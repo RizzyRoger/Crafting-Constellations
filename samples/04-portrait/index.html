@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Value Study 04</title>
+  <meta name="description" content="Crafting Constellations — design board 04: phone-first portrait sheet, the helper's side.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Kalam:wght@300;400&family=Source+Sans+3:wght@400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../shared/tokens.css">
+  <link rel="stylesheet" href="../shared/paper.css">
+  <style>
+    :root {
+      --name-size: 25px;
+      --note-size: 18px;
+    }
+
+    .stage {
+      display: grid;
+      grid-template-columns: 1fr;
+      justify-items: center;
+      padding: 12px 16px 0;
+    }
+
+    /* Portrait sheet: phone width first; on desktop it stays a sheet */
+    .sheet {
+      width: 100%;
+      max-width: 430px;
+      display: grid;
+      gap: 26px;
+      padding-bottom: 32px;
+    }
+
+    .sheet .wash {
+      height: min(50vh, 440px);
+      min-height: 280px;
+      margin: 0 -16px;
+    }
+
+    .plate {
+      margin-top: -10px;
+    }
+
+    .lede {
+      margin: 0;
+      font-size: 19px;
+      line-height: 1.35;
+      max-width: 19em;
+    }
+
+    h2 {
+      margin: 0 0 8px;
+      font-weight: 400;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .needs {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .need {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 2px 14px;
+      align-items: center;
+      padding: 12px 0 12px;
+      border-top: 1px solid var(--rule);
+    }
+
+    .need:last-child {
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .need .swatch {
+      grid-column: 1 / -1;
+      height: 14px;
+      width: 46%;
+      margin-bottom: 6px;
+    }
+
+    .need .pencil {
+      font-size: var(--note-size);
+      line-height: 1.25;
+    }
+
+    .need .code {
+      grid-column: 1;
+    }
+
+    .need .act {
+      grid-column: 2;
+      grid-row: 2 / span 2;
+      font-size: 16px;
+      white-space: nowrap;
+    }
+
+    .need:hover .pencil {
+      color: #1f1e22;
+    }
+
+    .system {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.5;
+    }
+
+    /* Desktop margin note: what this board tests */
+    .margin-note {
+      display: none;
+    }
+
+    .foot a {
+      color: var(--ink);
+    }
+
+    @media (min-width: 900px) {
+      .stage {
+        grid-template-columns: 1fr 430px 1fr;
+        align-items: start;
+        column-gap: 56px;
+        padding: clamp(16px, 4vh, 40px) var(--gutter) 0;
+      }
+
+      .sheet {
+        grid-column: 2;
+      }
+
+      .sheet .wash {
+        margin: 0;
+      }
+
+      .margin-note {
+        display: grid;
+        gap: 8px;
+        grid-column: 3;
+        justify-self: start;
+        margin-top: 52vh;
+        max-width: 220px;
+        font-size: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <filter id="pencil"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="4" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="1.8" xChannelSelector="R" yChannelSelector="G"/></filter>
+  </svg>
+
+  <div class="stage">
+    <main class="sheet">
+      <div class="wash" id="hero" aria-hidden="true"></div>
+
+      <header class="plate">
+        <h1 class="plate__name pencil ruled">Crafting Constellations</h1>
+        <p class="plate__line code" style="margin:0">PB29 / PBk6 — low staining — granulating</p>
+      </header>
+
+      <p class="lede pencil">A family you know wrote down what would help this week. Take one if you can.</p>
+
+      <section aria-labelledby="week">
+        <h2 class="code" id="week">This week <span class="synthetic">synthetic example</span></h2>
+        <ul class="needs">
+          <li class="need">
+            <span class="swatch" data-density="1" style="--d:var(--graphite-dense);--m:var(--graphite-mid);--t:var(--graphite-tail)"></span>
+            <span class="pencil">Tuesday dinner — leave food on the porch.</span>
+            <span class="code">anyone nearby · Tue after six</span>
+            <a class="act act--wash" href="#take-1">I can do this</a>
+          </li>
+          <li class="need">
+            <span class="swatch" data-density="0.72" style="--d:var(--fresco-dense);--m:var(--fresco-mid);--t:var(--fresco-tail)"></span>
+            <span class="pencil">Someone to sit in the waiting room.</span>
+            <span class="code">one person · Fri morning</span>
+            <a class="act" href="#take-2">I can do this</a>
+          </li>
+          <li class="need">
+            <span class="swatch" data-density="0.45" style="--d:var(--neutral-dense);--m:var(--neutral-mid);--t:var(--neutral-tail)"></span>
+            <span class="pencil">Lawn, whenever.</span>
+            <span class="code">anyone · any day</span>
+            <a class="act" href="#take-3">I can do this</a>
+          </li>
+        </ul>
+      </section>
+
+      <p class="system pencil">No feed. No replies needed.<br>The family sees who took what.</p>
+
+      <p class="foot code"><a href="../index.html">Board 04 · Portrait — back to index</a></p>
+    </main>
+
+    <aside class="margin-note pencil" aria-label="About this board">
+      <span>Phone first — built at 375 wide.</span>
+      <span>The helper’s side: someone the family sent a link to.</span>
+      <span class="code">value = how soon</span>
+    </aside>
+  </div>
+
+  <script type="module">
+    import { paintWash, paynesStops, paintSwatches } from '../shared/wash.js'
+
+    const start = () => {
+      paintWash(document.getElementById('hero'), {
+        seed: 404,
+        stops: paynesStops(),
+        granulation: 0.8,
+        streaks: 0.38,
+        duration: 1000,
+        strokes: [
+          { from: [0.1, 0.12], to: [0.96, 0.88], width: 0.62, density: 1, falloff: 1.8, rag: 0.18, dry: 0.65, pool: 0.55 },
+          { from: [0.14, 0.4], to: [0.72, 0.98], width: 0.34, density: 0.5, falloff: 2, rag: 0.24, dry: 0.7, pool: 0.2 },
+        ],
+      })
+      paintSwatches()
+    }
+
+    document.fonts.ready.then(start)
+  </script>
+</body>
+</html>

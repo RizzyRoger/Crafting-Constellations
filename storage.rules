@@ -1,0 +1,31 @@
+rules_version = '2';
+
+// Crafting Constellations — Storage rules
+// Professional license documents only: write-once, owner + admin read.
+// Admins read with getBlob()/getBytes(), never a download URL (those bypass rules).
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function claim(k) { return request.auth.token.get(k, false); }
+    function isAdmin() { return signedIn() && claim('admin') == true; }
+    function notBanned() {
+      return claim('banned') != true
+        && !firestore.exists(/databases/(default)/documents/bans/$(request.auth.uid));
+    }
+
+    match /proDocs/{ownerUid}/{fileName} {
+      allow get: if signedIn() && (request.auth.uid == ownerUid || isAdmin());
+      // resource == null: write-once even where an overwrite is evaluated as create
+      allow create: if signedIn() && request.auth.uid == ownerUid
+        && resource == null
+        && claim('email_verified') == true
+        && notBanned()
+        && fileName.matches('doc-[1-5]')
+        && request.resource.size > 0
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches('application/pdf|image/(png|jpeg|webp)');
+      allow list, update, delete: if false;
+    }
+  }
+}

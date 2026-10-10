@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Value Study Boards</title>
+  <meta name="description" content="Crafting Constellations — four sample boards in The Value Study, plus the two reference stills.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Kalam:wght@300;400&family=Source+Sans+3:wght@400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="shared/tokens.css">
+  <link rel="stylesheet" href="shared/paper.css">
+  <style>
+    .sheet {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: clamp(28px, 7vh, 72px) var(--gutter) 56px;
+      display: grid;
+      gap: clamp(36px, 6vh, 64px);
+    }
+
+    .top {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 32px;
+      align-items: end;
+    }
+
+    .top .note {
+      margin: 0;
+      font-size: 19px;
+      max-width: 22em;
+      justify-self: end;
+    }
+
+    h2 {
+      margin: 0 0 6px;
+      font-weight: 400;
+    }
+
+    .boards {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .boards a {
+      display: grid;
+      grid-template-columns: minmax(180px, 42%) minmax(0, 1fr) auto;
+      gap: 6px 28px;
+      align-items: center;
+      padding: 16px 0;
+      border-top: 1px solid var(--rule);
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .boards li:last-child a {
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .boards .swatch {
+      height: 52px;
+      grid-row: 1 / span 2;
+    }
+
+    .boards .pencil {
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .boards .code {
+      grid-column: 2;
+    }
+
+    .boards .tests {
+      grid-column: 3;
+      grid-row: 1 / span 2;
+      max-width: 17em;
+      font-size: 16px;
+      line-height: 1.3;
+      text-align: right;
+    }
+
+    .boards a:hover .pencil,
+    .boards a:focus-visible .pencil {
+      color: #1f1e22;
+    }
+
+    .refs {
+      display: grid;
+      grid-template-columns: minmax(0, 2.4fr) minmax(0, 1fr);
+      gap: 28px;
+      align-items: start;
+    }
+
+    figure {
+      margin: 0;
+      display: grid;
+      gap: 8px;
+    }
+
+    figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+      outline: 1px solid var(--rule);
+    }
+
+    figcaption {
+      line-height: 1.4;
+    }
+
+    @media (max-width: 760px) {
+      .top,
+      .refs {
+        grid-template-columns: 1fr;
+      }
+
+      .top .note {
+        justify-self: start;
+      }
+
+      .boards a {
+        grid-template-columns: 1fr;
+      }
+
+      .boards .swatch {
+        grid-row: auto;
+        width: 80%;
+      }
+
+      .boards .code,
+      .boards .tests {
+        grid-column: 1;
+        grid-row: auto;
+        text-align: left;
+      }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <filter id="pencil"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="4" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="1.8" xChannelSelector="R" yChannelSelector="G"/></filter>
+  </svg>
+
+  <main class="sheet">
+    <header class="top">
+      <div class="plate">
+        <h1 class="plate__name pencil ruled">Crafting Constellations</h1>
+        <p class="plate__line code" style="margin:0">The Value Study — four boards — 2026-10-10</p>
+      </div>
+      <p class="note pencil">Same world, four sheets.<br>Pick the one to build from, or the parts of each.</p>
+    </header>
+
+    <section aria-labelledby="boards-title">
+      <h2 class="code" id="boards-title">Boards</h2>
+      <ol class="boards">
+        <li>
+          <a href="01-study/index.html">
+            <span class="swatch" data-loose data-density="1" style="--d:var(--paynes-blue-dense);--m:var(--paynes-blue-mid);--t:var(--paynes-blue-tail)"></span>
+            <span class="pencil">01 Study</span>
+            <span class="code">the comp at real scale · Kalam 300</span>
+            <span class="tests pencil">Baseline. Wash left, caption plate, pigment rail, three system notes.</span>
+          </a>
+        </li>
+        <li>
+          <a href="02-sheet/index.html">
+            <span class="swatch" data-loose data-density="0.9" style="--d:var(--graphite-dense);--m:var(--graphite-mid);--t:var(--graphite-tail)"></span>
+            <span class="pencil">02 Sheet</span>
+            <span class="code">source sheet as interface · Nanum Pen</span>
+            <span class="tests pencil">Navigation as a pigment index. Darker wash, more important.</span>
+          </a>
+        </li>
+        <li>
+          <a href="03-outreach/index.html">
+            <span class="swatch" data-loose data-density="0.8" data-gran="0.8" style="--d:var(--fresco-dense);--m:var(--fresco-mid);--t:var(--fresco-tail)"></span>
+            <span class="pencil">03 Outreach</span>
+            <span class="code">need / who can act / when · humanist italic</span>
+            <span class="tests pencil">The ask as ruled fields. Does the quieter voice read better for product UI?</span>
+          </a>
+        </li>
+        <li>
+          <a href="04-portrait/index.html">
+            <span class="swatch" data-loose data-density="0.7" data-gran="0.2" style="--d:var(--caliente-dense);--m:var(--caliente-mid);--t:var(--caliente-tail)"></span>
+            <span class="pencil">04 Portrait</span>
+            <span class="code">phone first · the helper’s side · Kalam 300</span>
+            <span class="tests pencil">What a friend sees from the family’s link. One action per need.</span>
+          </a>
+        </li>
+      </ol>
+    </section>
+
+    <section aria-labelledby="refs-title">
+      <h2 class="code" id="refs-title">North-star stills — if a board and a still disagree, the still wins</h2>
+      <div class="refs">
+        <figure>
+          <img src="../.impeccable/references/value-study.webp" width="1280" height="720" alt="Reference comp: a diagonal Payne's gray watercolor wash on the left, a ruled caption box reading Crafting Constellations, five gray swatch bars with handwritten pigment notes, and three system notes.">
+          <figcaption class="code">value-study.webp — comp</figcaption>
+        </figure>
+        <figure>
+          <img src="../.impeccable/references/swatch-sheet.webp" width="695" height="1024" alt="Source sheet: nine hand-painted gray watercolor swatches, each fading left to right, with handwritten pigment codes and staining notes.">
+          <figcaption class="code">swatch-sheet — source</figcaption>
+        </figure>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { paintSwatches } from './shared/wash.js'
+
+    document.fonts.ready.then(() => paintSwatches())
+  </script>
+</body>
+</html>
