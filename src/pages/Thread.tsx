@@ -44,7 +44,7 @@ export const Thread = () => {
   }
 
   return (
-    <div className="stack" style={{ gap: 24, maxWidth: 760 }}>
+    <div className="stage">
       <Link to="/messages" className="code">
         ← Private notes
       </Link>

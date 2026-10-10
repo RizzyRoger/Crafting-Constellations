@@ -117,7 +117,7 @@ export const Group = () => {
   }
 
   return (
-    <>
+    <div className="pane">
       <PageHead
         title={group.data.name}
         kicker={`${group.data.constellationName} · ${group.data.memberCount ?? 0} ${group.data.memberCount === 1 ? 'person' : 'people'}`}
@@ -161,6 +161,6 @@ export const Group = () => {
       ) : (
         <p className="empty">Join to read and write here. You can leave any time.</p>
       )}
-    </>
+    </div>
   )
 }
