@@ -469,6 +469,43 @@ p {
   padding: 24px 0;
 }
 
+.host {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  max-width: 34em;
+  margin-inline: auto;
+  text-align: center;
+  padding: 8px 0 20px;
+}
+
+.pane > .host {
+  flex: 1;
+  align-content: center;
+  min-height: 180px;
+}
+
+.host__copy {
+  display: grid;
+  gap: 8px;
+  font-family: var(--font-pencil);
+  font-weight: 300;
+  font-size: 20px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.host__copy p {
+  margin: 0;
+}
+
+.host .link-btn {
+  font-family: var(--font-pencil);
+  font-size: 18px;
+  font-weight: 300;
+  letter-spacing: 0;
+}
+
 /* ---------- composer ---------- */
 
 .composer {
@@ -842,30 +879,30 @@ p {
 .story--open {
   grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.28fr);
   gap: clamp(12px, 2vw, 28px);
+  align-items: stretch;
 }
 
 .story__intro {
   position: relative;
-  min-height: 72vh;
   display: grid;
-  align-items: end;
+  min-height: 0;
 }
 
 .story__wash {
   position: absolute;
   z-index: 0;
-  left: 0;
-  top: 0;
+  inset: 0;
   width: 100%;
-  height: 58%;
+  height: 100%;
   pointer-events: none;
 }
 
 .story__title {
   position: relative;
   z-index: 1;
+  align-self: end;
   justify-self: start;
-  margin: 0;
+  margin: 0 0 -0.4em 0;
   max-width: 8em;
   font-size: clamp(48px, 5.4vw, 76px);
   line-height: 0.98;
@@ -1103,6 +1140,56 @@ p {
   position: relative;
   display: grid;
   gap: 24px;
+}
+
+.chart-welcome {
+  display: grid;
+  justify-items: start;
+  gap: 16px;
+  max-width: 40rem;
+  padding: 8px 0 28px;
+}
+
+.chart-welcome__lead {
+  font-family: var(--font-pencil);
+  font-weight: 300;
+  font-size: clamp(22px, 2.4vw, 28px);
+  line-height: 1.3;
+  color: var(--ink-deep);
+  max-width: 22em;
+  margin: 0;
+}
+
+.chart-welcome h2 {
+  font-family: var(--font-pencil);
+  font-weight: 300;
+  font-size: 22px;
+  color: var(--ink-deep);
+  margin-top: 12px;
+}
+
+.chart-welcome .ruled-list {
+  width: 100%;
+}
+
+.chart-welcome .ruled-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+}
+
+.chart-welcome .ruled-list a {
+  font-family: var(--font-pencil);
+  font-size: 18px;
+  color: var(--ink-deep);
+  text-decoration: none;
+}
+
+.chart-welcome .ruled-list a:hover,
+.chart-welcome .ruled-list a:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .chart {
@@ -1344,6 +1431,16 @@ p {
 .disc__empty {
   color: var(--meta-readable);
   cursor: auto;
+}
+
+a.disc__empty {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+a.disc__empty:hover {
+  color: var(--ink-deep);
 }
 
 .disc__list a[aria-current='page'] {
@@ -1693,12 +1790,14 @@ p {
 
   .story__wash {
     position: relative;
+    inset: auto;
     top: 0;
     width: 100%;
     height: 26vh;
   }
 
   .story__title {
+    align-self: start;
     justify-self: start;
     margin: 8px 0 0;
     max-width: none;

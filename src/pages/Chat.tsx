@@ -82,9 +82,9 @@ export const Chat = () => {
         me={uid}
         verified={verified}
         label="Private chat"
-        empty="Nothing written yet."
         privateThread
         people={among(people.data, chat.data.uids, uid)}
+        host={<p>{chat.data.uids.length === 1 ? '1 person is in this chat.' : `${chat.data.uids.length} people are in this chat.`}</p>}
       />
     </div>
   )

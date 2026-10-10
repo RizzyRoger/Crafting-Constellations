@@ -1,5 +1,5 @@
 import { moderate, type Context } from '@moderation'
-import { useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from 'react'
 import { describeError } from '../lib/callables'
 import { insertMention, keptMentions, matchPeople, mentionQuery } from '../lib/mentions'
 import type { Profile } from '../lib/types'
@@ -20,6 +20,7 @@ interface ComposerProps {
   expandable?: boolean
   // People who can read this place and can be pinged with @; leave out for no mentions
   people?: readonly Mentionable[]
+  textRef?: Ref<HTMLTextAreaElement>
   // mentions: uids picked with @ whose name is still in the words
   onSubmit: (text: string, title: string | undefined, mentions: string[]) => Promise<void>
 }
@@ -40,6 +41,7 @@ export const Composer = ({
   shape = 'rule',
   expandable = false,
   people,
+  textRef,
   onSubmit,
 }: ComposerProps) => {
   const [text, setText] = useState('')
@@ -142,7 +144,11 @@ export const Composer = ({
           {label}
         </label>
         <textarea
-          ref={field}
+          ref={(node) => {
+            field.current = node
+            if (typeof textRef === 'function') textRef(node)
+            else if (textRef) textRef.current = node
+          }}
           id={`${id}-text`}
           rows={expanded ? Math.max(rows, 8) : bar ? 1 : rows}
           value={text}

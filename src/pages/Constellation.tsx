@@ -1,6 +1,6 @@
 import { collection, collectionGroup, orderBy, query, where } from 'firebase/firestore'
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { Quiet } from '../components/Quiet'
 import { ConstellationList } from '../constellation/ConstellationList'
@@ -11,6 +11,7 @@ import { PersonSheet } from '../constellation/PersonSheet'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import type { Connection, Constellation as ConstellationDoc, Group, Profile } from '../lib/types'
+import { Blot } from '../wash/Blot'
 
 type View = 'friends' | 'groups' | 'list'
 
@@ -22,11 +23,21 @@ const VIEWS: { id: View; label: string }[] = [
 
 const asTie = (id: string, uids: string[]): EgoTie | null => (uids.length === 2 ? { id, uids: [uids[0], uids[1]] } : null)
 
+const isView = (value: string | null): value is View => value === 'friends' || value === 'groups' || value === 'list'
+
 export const Constellation = () => {
-  const { uid, claims } = useMe()
+  const { uid, profile, claims } = useMe()
   const [params, setParams] = useSearchParams()
-  const [view, setView] = useState<View>('friends')
+  const requested = params.get('view')
+  const view: View = isView(requested) ? requested : 'friends'
   const [selected, setSelected] = useState<string | null>(params.get('person'))
+
+  const setView = (next: View) => {
+    const nextParams = new URLSearchParams(params)
+    if (next === 'friends') nextParams.delete('view')
+    else nextParams.set('view', next)
+    setParams(nextParams, { replace: true })
+  }
 
   useEffect(() => {
     const requested = params.get('person')
@@ -109,16 +120,25 @@ export const Constellation = () => {
       ) : (
         <div className="constellation">
           {view === 'friends' ? (
-            <EgoMap
-              me={uid}
-              people={visiblePeople}
-              friendships={friendshipTies}
-              pending={pendingTies}
-              blocked={blocked}
-              sharedGroups={sharedGroups}
-              selected={selected}
-              onSelect={setSelected}
-            />
+            friendshipTies.length === 0 && pendingTies.length === 0 ? (
+              <ChartWelcome
+                seed={profile.avatarSeed || uid}
+                pigment={profile.pigment}
+                groups={groups.data.filter((group) => !myGroupIds.has(group.id))}
+                onGroups={() => setView('groups')}
+              />
+            ) : (
+              <EgoMap
+                me={uid}
+                people={visiblePeople}
+                friendships={friendshipTies}
+                pending={pendingTies}
+                blocked={blocked}
+                sharedGroups={sharedGroups}
+                selected={selected}
+                onSelect={setSelected}
+              />
+            )
           ) : view === 'groups' ? (
             <ConstellationMap
               constellations={constellations.data}
@@ -162,3 +182,36 @@ export const Constellation = () => {
     </>
   )
 }
+
+const ChartWelcome = ({
+  seed,
+  pigment,
+  groups,
+  onGroups,
+}: {
+  seed: string
+  pigment: Profile['pigment']
+  groups: Group[]
+  onGroups: () => void
+}) => (
+  <section className="chart-welcome" aria-label="Your chart">
+    <Blot seed={seed} pigment={pigment} size={72} />
+    <p className="chart-welcome__lead">This chart is yours for now. It fills in as people connect with you.</p>
+    {groups.length > 0 && (
+      <>
+        <h2>Groups you can join</h2>
+        <ul className="ruled-list">
+          {groups.map((group) => (
+            <li key={group.id}>
+              <Link to={`/groups/${group.id}`}>{group.name}</Link>
+              {group.constellationName && <span className="meta">{group.constellationName}</span>}
+            </li>
+          ))}
+        </ul>
+      </>
+    )}
+    <button type="button" className="link-btn" onClick={onGroups}>
+      See the groups chart
+    </button>
+  </section>
+)

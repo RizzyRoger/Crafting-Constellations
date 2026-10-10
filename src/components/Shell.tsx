@@ -135,7 +135,9 @@ const Rail = () => {
             Confirm email to open chats
           </Link>
         ) : sortedThreads.length === 0 && myChats.length === 0 ? (
-          <p className="disc__empty">No conversations yet.</p>
+          <Link to="/constellation" className="disc__empty">
+            No conversations yet.
+          </Link>
         ) : (
           <ul className="disc__list">
             {sortedThreads.map((thread) => {
@@ -162,7 +164,9 @@ const Rail = () => {
 
       <Disclosure label="Group Chats" open={groupsOpen} onToggle={setGroupsOpen}>
         {myGroups.length === 0 ? (
-          <p className="disc__empty">No groups yet.</p>
+          <Link to="/constellation?view=groups" className="disc__empty">
+            No groups yet.
+          </Link>
         ) : (
           <ul className="disc__list">
             {myGroups.map((group) => (

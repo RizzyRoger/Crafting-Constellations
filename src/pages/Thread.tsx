@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { Composer } from '../components/Composer'
+import { HostNote } from '../components/HostNote'
 import { Item } from '../components/Item'
 import { Quiet } from '../components/Quiet'
 import { Who } from '../components/Who'
@@ -22,6 +23,7 @@ export const Thread = () => {
   const open = participant && claims.emailVerified
   const messages = useLiveContent<Message>(open ? `dms/${pairId}/messages` : null, uid, { direction: 'asc', max: 200 })
   const end = useRef<HTMLDivElement>(null)
+  const field = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'nearest' })
@@ -54,7 +56,15 @@ export const Thread = () => {
       </header>
 
       <div className="chat" aria-live="polite" aria-label="Conversation">
-        {messages.data.length === 0 && !messages.loading && <p className="empty">Nothing written yet.</p>}
+        {messages.data.length === 0 && !messages.loading && canWrite && (
+          <HostNote
+            action={{
+              label: `Write the first note to ${other.data?.penName ?? 'them'}.`,
+              onClick: () => field.current?.focus(),
+            }}
+          />
+        )}
+        {messages.data.length === 0 && !messages.loading && !canWrite && <p className="empty">Nothing written yet.</p>}
         {messages.data.map((m) => (
           <Item key={m.id} item={m} me={uid} blotSize={36} variant="bubble" privateThread>
             <p className="voice">{m.text}</p>
@@ -64,7 +74,7 @@ export const Thread = () => {
       </div>
 
       {canWrite ? (
-        <Composer shape="bar" label="Message" submitLabel="Send" rows={1} context="private" onSubmit={send} />
+        <Composer shape="bar" label="Message" submitLabel="Send" rows={1} context="private" textRef={field} onSubmit={send} />
       ) : (
         <p className="pencil note">
           {connection.data?.status === 'blocked'

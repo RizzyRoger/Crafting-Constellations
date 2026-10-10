@@ -1,9 +1,10 @@
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { Composer } from '../components/Composer'
 import { ConfirmEmail } from '../components/ConfirmEmail'
+import { HostNote } from '../components/HostNote'
 import { Item } from '../components/Item'
 import { LikeButton } from '../components/LikeButton'
 import { MentionText } from '../components/MentionText'
@@ -20,11 +21,24 @@ import { HEAD_DESCENDING } from '../wash/strokes'
 
 type Tab = 'talk' | 'posts'
 
-const Posts = ({ groupId, me, verified, people }: { groupId: string; me: string; verified: boolean; people: Profile[] }) => {
-  const posts = useLiveContent<Post>(`groups/${groupId}/posts`, me, { max: 40 })
+const peopleHere = (count: number | undefined) => {
+  const n = count ?? 0
+  return n === 1 ? '1 person is here.' : `${n} people are here.`
+}
+
+const RoomHost = ({ description, count }: { description?: string; count?: number }) => (
+  <>
+    {description ? <p>{description}</p> : null}
+    <p>{peopleHere(count)}</p>
+  </>
+)
+
+const Posts = ({ group, me, verified, people }: { group: GroupDoc; me: string; verified: boolean; people: Profile[] }) => {
+  const posts = useLiveContent<Post>(`groups/${group.id}/posts`, me, { max: 40 })
+  const field = useRef<HTMLTextAreaElement>(null)
 
   const publish = async (body: string, title: string | undefined, mentions: string[]) => {
-    await addDoc(collection(db, `groups/${groupId}/posts`), {
+    await addDoc(collection(db, `groups/${group.id}/posts`), {
       authorUid: me,
       ...(title ? { title } : {}),
       body,
@@ -34,16 +48,31 @@ const Posts = ({ groupId, me, verified, people }: { groupId: string; me: string;
     })
   }
 
+  const quiet = posts.data.length === 0 && !posts.loading
+
   return (
     <div className="stack" style={{ gap: 28 }}>
+      {quiet && (
+        <HostNote action={verified ? { label: 'Write the first note', onClick: () => field.current?.focus() } : undefined}>
+          <RoomHost description={group.description} count={group.memberCount} />
+        </HostNote>
+      )}
       {verified ? (
-        <Composer expandable label="Make a post" withTitle rows={4} max={4000} submitLabel="Send" people={people} onSubmit={publish} />
+        <Composer
+          expandable
+          label="Make a post"
+          withTitle
+          rows={4}
+          max={4000}
+          submitLabel="Send"
+          people={people}
+          textRef={field}
+          onSubmit={publish}
+        />
       ) : (
         <ConfirmEmail />
       )}
-      {posts.data.length === 0 && !posts.loading ? (
-        <p className="empty">No posts yet.</p>
-      ) : (
+      {quiet ? null : (
         <ul className="post-list">
           {posts.data.map((p) => (
             <li key={p.id}>
@@ -55,7 +84,7 @@ const Posts = ({ groupId, me, verified, people }: { groupId: string; me: string;
                   p.status === 'published' && verified && (
                     <>
                       <LikeButton postPath={p.path} me={me} count={p.likeCount} />
-                      <Link to={`/groups/${groupId}/posts/${p.id}`} className="mark" aria-label={p.commentCount ? `${p.commentCount} comments` : 'Comment'}>
+                      <Link to={`/groups/${group.id}/posts/${p.id}`} className="mark" aria-label={p.commentCount ? `${p.commentCount} comments` : 'Comment'}>
                         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
                           <path d="M5 6.5h14v9H8l-3 3v-12z" />
                         </svg>
@@ -66,7 +95,7 @@ const Posts = ({ groupId, me, verified, people }: { groupId: string; me: string;
               >
                 {p.title && (
                   <h3 className="post__title">
-                    {p.status === 'published' ? <Link to={`/groups/${groupId}/posts/${p.id}`}>{p.title}</Link> : p.title}
+                    {p.status === 'published' ? <Link to={`/groups/${group.id}/posts/${p.id}`}>{p.title}</Link> : p.title}
                   </h3>
                 )}
                 <MentionText text={p.body.length > 600 ? `${p.body.slice(0, 600)}…` : p.body} mentioned={p.mentioned} me={me} />
@@ -157,13 +186,24 @@ export const Group = () => {
             </button>
           </div>
           {tab === 'talk' ? (
-            <Talk path={`groups/${groupId}/messages`} me={uid} verified={claims.emailVerified} people={people} />
+            <Talk
+              path={`groups/${groupId}/messages`}
+              me={uid}
+              verified={claims.emailVerified}
+              people={people}
+              host={<RoomHost description={group.data.description} count={group.data.memberCount} />}
+            />
           ) : (
-            <Posts groupId={groupId} me={uid} verified={claims.emailVerified} people={people} />
+            <Posts group={group.data} me={uid} verified={claims.emailVerified} people={people} />
           )}
         </>
       ) : (
-        <p className="empty">Join to read and write here. You can leave any time.</p>
+        <div className="host">
+          <div className="host__copy">
+            {group.data.description ? <p>{group.data.description}</p> : null}
+            <p>Join to read and write here. You can leave any time.</p>
+          </div>
+        </div>
       )}
     </div>
   )
