@@ -1,5 +1,33 @@
 # Crafting Constellations — web app (Firebase)
 
+## Reach out, Accept, and private group chats (2026-10-10)
+
+Plan: `/Users/darren/.claude/plans/this-site-is-looking-giggly-robin.md`
+
+- [x] Accept: unverified recipients see "Confirm your email to accept" instead of a silent grey button; a confirmation made in another tab is picked up on focus
+- [x] Reach out: removed the symmetric "friend's friend" lockout (both people were told the other would connect first)
+- [x] Constellation waits for connections before offering Reach out; leftover debug beacons removed
+- [x] Private group chats: `createChat` callable (accepted connections only, up to 20), `chats/{id}/messages` rules, moderation, reports, review queue, ban cleanup
+- [x] New chat page, chat page with Leave, chats listed under Group Chats in the rail; group Talk extracted and shared
+
+### Verification
+
+- [x] `npm test`: 65 passed; `npm run build` and functions build pass
+- [x] Rules: 39 passed (new: unverified recipient can't accept; chats read/list, client create, member writes, leave-only-yourself, reportable)
+- [x] Browser against an isolated emulator suite:
+  - friend's friend reach out → accept
+  - unverified Accept hint → verify → Accept appears on focus → accepted
+  - create chat → publish → member reads → non-member refused → leave
+  - crisis note in a chat is delivered with resources and queued at priority 2
+  - 375px: no horizontal scroll
+
+### Review
+
+- **Found in testing:** one Firestore SDK internal assertion (ID ca9: a watch target's pending count went below zero). It appeared once during a sign-in-and-leave sequence. It didn't come back in 30 targeted retries of leave and sign-in/out, so no code was changed for it.
+- **Follow-ups:** add people to an existing chat; rename a chat.
+
+---
+
 Plan: `/Users/darren/.claude/plans/pasted-content-id-5983-the-value-lively-dahl.md`
 
 - [x] 1. Scaffold: Vite + React + TS, functions package, firebase.json / .firebaserc / emulators, styles, wash renderer ported to TS (worker)
