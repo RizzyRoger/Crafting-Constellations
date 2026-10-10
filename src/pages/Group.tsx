@@ -33,13 +33,13 @@ const Talk = ({ groupId, me }: { groupId: string; me: string }) => {
       <div className="chat" aria-live="polite" aria-label="Group talk">
         {messages.data.length === 0 && !messages.loading && <p className="empty">Nobody has said anything yet. Say hello, or just read.</p>}
         {messages.data.map((m) => (
-          <Item key={m.id} item={m} me={me} blotSize={22}>
+          <Item key={m.id} item={m} me={me} blotSize={36} variant="bubble">
             <p className="voice">{m.text}</p>
           </Item>
         ))}
         <div ref={end} />
       </div>
-      <Composer label="Write to the group" submitLabel="Send" rows={2} onSubmit={send} />
+      <Composer shape="bar" label="Message" submitLabel="Send" rows={1} onSubmit={send} />
     </div>
   )
 }
@@ -59,22 +59,25 @@ const Posts = ({ groupId, me }: { groupId: string; me: string }) => {
 
   return (
     <div className="stack" style={{ gap: 28 }}>
-      <Composer label="Write a post" withTitle rows={4} max={4000} submitLabel="Post" onSubmit={publish} />
+      <Composer expandable label="Make a post" withTitle rows={4} max={4000} submitLabel="Send" onSubmit={publish} />
       {posts.data.length === 0 && !posts.loading ? (
         <p className="empty">No posts yet.</p>
       ) : (
-        <ul className="ruled-list">
+        <ul className="post-list">
           {posts.data.map((p) => (
             <li key={p.id}>
               <Item
                 item={p}
                 me={me}
+                variant="card"
                 actions={
                   p.status === 'published' && (
                     <>
                       <LikeButton postPath={p.path} me={me} count={p.likeCount} />
-                      <Link to={`/groups/${groupId}/posts/${p.id}`} className="link-btn">
-                        {p.commentCount ? `Comments · ${p.commentCount}` : 'Comment'}
+                      <Link to={`/groups/${groupId}/posts/${p.id}`} className="mark" aria-label={p.commentCount ? `${p.commentCount} comments` : 'Comment'}>
+                        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                          <path d="M5 6.5h14v9H8l-3 3v-12z" />
+                        </svg>
                       </Link>
                     </>
                   )

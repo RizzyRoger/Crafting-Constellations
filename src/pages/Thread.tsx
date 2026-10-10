@@ -56,7 +56,7 @@ export const Thread = () => {
       <div className="chat" aria-live="polite" aria-label="Conversation">
         {messages.data.length === 0 && !messages.loading && <p className="empty">Nothing written yet.</p>}
         {messages.data.map((m) => (
-          <Item key={m.id} item={m} me={uid} blotSize={22} privateThread>
+          <Item key={m.id} item={m} me={uid} blotSize={36} variant="bubble" privateThread>
             <p className="voice">{m.text}</p>
           </Item>
         ))}
@@ -64,7 +64,7 @@ export const Thread = () => {
       </div>
 
       {canWrite ? (
-        <Composer label="Write privately" submitLabel="Send" rows={2} context="private" onSubmit={send} />
+        <Composer shape="bar" label="Message" submitLabel="Send" rows={1} context="private" onSubmit={send} />
       ) : (
         <p className="pencil note">
           {connection.data?.status === 'blocked'

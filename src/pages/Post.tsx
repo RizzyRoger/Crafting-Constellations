@@ -45,26 +45,43 @@ export const PostPage = () => {
         ← {group.data?.name ?? 'Group'}
       </Link>
 
-      <Item item={post.data} me={uid} blotSize={32} actions={post.data.status === 'published' && <LikeButton postPath={path} me={uid} count={post.data.likeCount} />}>
+      <Item
+        item={post.data}
+        me={uid}
+        blotSize={32}
+        variant="card"
+        actions={
+          post.data.status === 'published' && (
+            <>
+              <LikeButton postPath={path} me={uid} count={post.data.likeCount} />
+              <span className="mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22">
+                  <path d="M5 6.5h14v9H8l-3 3v-12z" />
+                </svg>
+              </span>
+            </>
+          )
+        }
+      >
         {post.data.title && <h1 className="post__title" style={{ fontSize: 30 }}>{post.data.title}</h1>}
         <p className="voice">{post.data.body}</p>
       </Item>
 
-      <section className="section" aria-labelledby="comments">
+      <section className="section comment-break" aria-labelledby="comments">
         <div className="section__head">
           <h2 id="comments">Comments</h2>
         </div>
         {comments.data.length === 0 && !comments.loading && <p className="empty">No comments yet.</p>}
-        <ul className="ruled-list">
+        <ul className="post-list">
           {comments.data.map((c) => (
             <li key={c.id}>
-              <Item item={c} me={uid} blotSize={22}>
+              <Item item={c} me={uid} blotSize={36} variant="comment">
                 <p className="voice">{c.text}</p>
               </Item>
             </li>
           ))}
         </ul>
-        {post.data.status === 'published' && <Composer label="Add a comment" submitLabel="Comment" rows={2} onSubmit={reply} />}
+        {post.data.status === 'published' && <Composer shape="bar" label="Comment" submitLabel="Send" rows={1} onSubmit={reply} />}
       </section>
     </div>
   )

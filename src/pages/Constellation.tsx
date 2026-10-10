@@ -1,10 +1,11 @@
 import { collection, collectionGroup, orderBy, query, where } from 'firebase/firestore'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
-import { PageHead } from '../components/PageHead'
 import { Quiet } from '../components/Quiet'
 import { ConstellationList } from '../constellation/ConstellationList'
-import { ConstellationMap } from '../constellation/ConstellationMap'
+import { EgoMap } from '../constellation/EgoMap'
+import { canReachOutTo, type EgoTie } from '../constellation/egoLayout'
 import { PersonSheet } from '../constellation/PersonSheet'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
@@ -12,10 +13,18 @@ import type { Connection, Constellation as ConstellationDoc, Group, Profile } fr
 
 type View = 'chart' | 'list'
 
+const asTie = (id: string, uids: string[]): EgoTie | null => (uids.length === 2 ? { id, uids: [uids[0], uids[1]] } : null)
+
 export const Constellation = () => {
   const { uid, claims } = useMe()
+  const [params, setParams] = useSearchParams()
   const [view, setView] = useState<View>('chart')
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(params.get('person'))
+
+  useEffect(() => {
+    const requested = params.get('person')
+    if (requested) setSelected(requested)
+  }, [params])
 
   const constellations = useQueryData<ConstellationDoc>('constellations', () => query(collection(db, 'constellations'), orderBy('order')))
   const groups = useQueryData<Group>('groups', () => collection(db, 'groups'))
@@ -31,29 +40,45 @@ export const Constellation = () => {
   const peopleById = useMemo(() => new Map(visiblePeople.map((p) => [p.id, p])), [visiblePeople])
   const myGroupIds = useMemo(() => new Set(memberships.filter((m) => m.uid === uid).map((m) => m.groupId)), [memberships, uid])
 
+  const friendshipTies = useMemo(
+    () => friendships.data.flatMap((f) => { const tie = asTie(f.id, f.uids ?? []); return tie ? [tie] : [] }),
+    [friendships.data],
+  )
+  const pendingTies = useMemo(
+    () => connections.data.filter((c) => c.status === 'pending').flatMap((c) => { const tie = asTie(c.id, c.uids ?? []); return tie ? [tie] : [] }),
+    [connections.data],
+  )
+  const blocked = useMemo(
+    () => connections.data.filter((c) => c.status === 'blocked').map((c) => c.uids.find((id) => id !== uid) ?? '').filter(Boolean),
+    [connections.data, uid],
+  )
+  const sharedGroups = useMemo(() => {
+    const mine = new Set(memberships.filter((m) => m.uid === uid).map((m) => m.groupId))
+    const counts: Record<string, number> = {}
+    for (const membership of memberships) {
+      if (mine.has(membership.groupId)) counts[membership.uid] = (counts[membership.uid] ?? 0) + 1
+    }
+    return counts
+  }, [memberships, uid])
+
   const person = selected ? peopleById.get(selected) : undefined
   const connectionWith = (other: string) => (other === uid ? undefined : connections.data.find((c) => c.uids.includes(other)))
   const groupsOf = (other: string) => groups.data.filter((g) => memberships.some((m) => m.uid === other && m.groupId === g.id))
-
-  // Everyone's accepted friendships, plus my own pending requests (dashed)
-  const lines = useMemo(
-    () => [
-      ...friendships.data.map((f) => ({ id: f.id, uids: f.uids, status: 'accepted' as const })),
-      ...connections.data.filter((c) => c.status === 'pending').map((c) => ({ id: c.id, uids: c.uids, status: 'pending' as const })),
-    ],
-    [friendships.data, connections.data],
-  )
-
-  const loading = constellations.loading || groups.loading || people.loading
   const incoming = connections.data.filter((c) => c.status === 'pending' && c.recipient === uid)
+  const loading = constellations.loading || groups.loading || people.loading || friendships.loading
+
+  const closeSheet = () => {
+    setSelected(null)
+    if (params.get('person')) {
+      const next = new URLSearchParams(params)
+      next.delete('person')
+      setParams(next, { replace: true })
+    }
+  }
 
   return (
     <>
-      <PageHead
-        title="Your constellation"
-        kicker="Constellation — PB29 / PBk6"
-        lede="Groups are drawn as circles, people as small washes. Lines are people who have connected. Choose anyone to see what you can do."
-      />
+      <h1 className="visually-hidden">Your constellation</h1>
 
       {incoming.length > 0 && (
         <p className="banner pencil" style={{ marginBottom: 20 }}>
@@ -64,7 +89,7 @@ export const Constellation = () => {
         </p>
       )}
 
-      <div className="tabs" role="tablist" aria-label="View">
+      <div className="view-switch" role="tablist" aria-label="View">
         {(['chart', 'list'] as const).map((v) => (
           <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}>
             {v === 'chart' ? 'Chart' : 'List'}
@@ -73,18 +98,17 @@ export const Constellation = () => {
       </div>
 
       {loading ? (
-        <Quiet>Laying out the sheet…</Quiet>
+        <Quiet>Laying out the chart…</Quiet>
       ) : (
         <div className="constellation">
           {view === 'chart' ? (
-            <ConstellationMap
-              constellations={constellations.data}
-              groups={groups.data}
-              memberships={memberships}
-              people={visiblePeople}
-              lines={lines}
+            <EgoMap
               me={uid}
-              myGroupIds={myGroupIds}
+              people={visiblePeople}
+              friendships={friendshipTies}
+              pending={pendingTies}
+              blocked={blocked}
+              sharedGroups={sharedGroups}
               selected={selected}
               onSelect={setSelected}
             />
@@ -108,7 +132,8 @@ export const Constellation = () => {
               verified={claims.emailVerified}
               connection={connectionWith(person.id)}
               groups={groupsOf(person.id)}
-              onClose={() => setSelected(null)}
+              canReachOut={canReachOutTo(uid, person.id, friendshipTies, pendingTies, blocked)}
+              onClose={closeSheet}
             />
           )}
         </div>

@@ -14,10 +14,11 @@ interface PersonSheetProps {
   connection?: Connection
   groups: Group[]
   onClose: () => void
+  canReachOut?: boolean
 }
 
 // What you can do with one person, depending on where the two of you stand
-export const PersonSheet = ({ person, me, verified, connection, groups, onClose }: PersonSheetProps) => {
+export const PersonSheet = ({ person, me, verified, connection, groups, onClose, canReachOut = true }: PersonSheetProps) => {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const pairId = pairIdOf(me, person.id)
@@ -71,14 +72,18 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
       ) : (
         <div className="row">
           {!connection &&
-            (verified ? (
-              <button type="button" className="act act--wash" disabled={busy} onClick={run(() => requestConnection(me, person.id))}>
-                Reach out
-              </button>
+            (canReachOut ? (
+              verified ? (
+                <button type="button" className="act act--wash" disabled={busy} onClick={run(() => requestConnection(me, person.id))}>
+                  Reach out
+                </button>
+              ) : (
+                <span className="hint">
+                  <Link to="/verify">Confirm your email</Link> to reach out.
+                </span>
+              )
             ) : (
-              <span className="hint">
-                <Link to="/verify">Confirm your email</Link> to reach out.
-              </span>
+              <p className="meta">A friend’s friend. They can connect with you first.</p>
             ))}
 
           {status === 'pending' && iAsked && (

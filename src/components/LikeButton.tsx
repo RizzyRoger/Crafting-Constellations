@@ -21,9 +21,11 @@ export const LikeButton = ({ postPath, me, count = 0 }: { postPath: string; me: 
   }
 
   return (
-    <button type="button" className="link-btn" aria-pressed={liked} disabled={busy} onClick={() => void toggle()}>
-      {liked ? 'Liked' : 'Like'}
-      {count > 0 ? ` · ${Math.max(0, count)}` : ''}
+    <button type="button" className={liked ? 'mark is-on' : 'mark'} aria-pressed={liked} aria-label={liked ? 'Unlike' : 'Like'} disabled={busy} onClick={() => void toggle()}>
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path d="M12 20s-7-4.4-7-9a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 4.6-7 9-7 9z" />
+      </svg>
+      {count > 0 ? <span className="visually-hidden">{count} likes</span> : null}
     </button>
   )
 }
