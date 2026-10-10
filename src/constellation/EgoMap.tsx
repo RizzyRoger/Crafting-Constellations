@@ -80,7 +80,7 @@ export const EgoMap = ({ me, people, friendships, pending, blocked, sharedGroups
         </svg>
       )}
       <figcaption className="ego__note">
-        Dots are larger when you share more groups. Lines are your direct ties, and your friends’ own. A friend’s friend is on the chart so you can see them — they connect with you first.
+        Dots are larger when you share more groups. Lines are your direct ties, and your friends’ own. A friend’s friend sits one step further out — choose anyone to reach out.
       </figcaption>
     </figure>
   )

@@ -1,6 +1,6 @@
 // Obsidian-style ego graph: you at the center, friends on the first ring,
-// and each friend's own friends one step further out. A friend's friend is
-// drawn, but not offered a new tie — they connect with you first.
+// and each friend's own friends one step further out, so you can see who
+// you might reach next.
 
 export interface EgoTie {
   id: string
@@ -25,7 +25,6 @@ export interface EgoNode {
   y: number
   r: number
   role: EgoRole
-  canReachOut: boolean
 }
 
 export interface EgoEdge {
@@ -124,7 +123,6 @@ export const layoutEgo = ({ width, height, me, friendships, pending, blocked = [
       y: p.y,
       r: radiusFor(role, sharedGroups[uid] ?? 0),
       role,
-      canReachOut: false,
     }
   })
 
@@ -140,12 +138,4 @@ export const layoutEgo = ({ width, height, me, friendships, pending, blocked = [
   }
 
   return { width, height, nodes, edges }
-}
-
-/** People already on your chart are not offered a new tie. Anyone else can be. */
-export const canReachOutTo = (me: string, uid: string, friendships: EgoTie[], pending: EgoTie[], blocked: string[] = []) => {
-  if (!uid || uid === me) return false
-  const layout = layoutEgo({ width: 10, height: 10, me, friendships, pending, blocked, sharedGroups: {} })
-  const node = layout.nodes.find((n) => n.uid === uid)
-  return node ? node.canReachOut : true
 }

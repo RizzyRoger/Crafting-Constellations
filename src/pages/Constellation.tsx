@@ -6,7 +6,7 @@ import { Quiet } from '../components/Quiet'
 import { ConstellationList } from '../constellation/ConstellationList'
 import { ConstellationMap } from '../constellation/ConstellationMap'
 import { EgoMap } from '../constellation/EgoMap'
-import { canReachOutTo, type EgoTie } from '../constellation/egoLayout'
+import type { EgoTie } from '../constellation/egoLayout'
 import { PersonSheet } from '../constellation/PersonSheet'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
@@ -72,13 +72,7 @@ export const Constellation = () => {
   const connectionWith = (other: string) => (other === uid ? undefined : connections.data.find((c) => c.uids.includes(other)))
   const groupsOf = (other: string) => groups.data.filter((g) => memberships.some((m) => m.uid === other && m.groupId === g.id))
   const incoming = connections.data.filter((c) => c.status === 'pending' && c.recipient === uid)
-  const loading = constellations.loading || groups.loading || people.loading || friendships.loading
-
-  useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7404/ingest/adb60411-22ef-4c89-8427-3ded0fdd934d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'19dc83'},body:JSON.stringify({sessionId:'19dc83',hypothesisId:'C',location:'Constellation.tsx:view',message:'constellation data',data:{view,loading,constellations:constellations.data.length,groups:groups.data.length,people:visiblePeople.length,friendships:friendshipTies.length,errors:{constellations:constellations.error?.message??null,groups:groups.error?.message??null,people:people.error?.message??null,friendships:friendships.error?.message??null}},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-  }, [view, loading, constellations.data.length, groups.data.length, visiblePeople.length, friendshipTies.length, constellations.error, groups.error, people.error, friendships.error])
+  const loading = constellations.loading || groups.loading || people.loading || friendships.loading || connections.loading
 
   const closeSheet = () => {
     setSelected(null)
@@ -160,7 +154,6 @@ export const Constellation = () => {
               verified={claims.emailVerified}
               connection={connectionWith(person.id)}
               groups={groupsOf(person.id)}
-              canReachOut={canReachOutTo(uid, person.id, friendshipTies, pendingTies, blocked)}
               onClose={closeSheet}
             />
           )}

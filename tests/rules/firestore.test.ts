@@ -210,6 +210,12 @@ describe('connections', () => {
     await assertSucceeds(updateDoc(doc(carl(), `connections/${r.id}`), { status: 'accepted', updatedAt: serverTimestamp() }))
   })
 
+  it('an unverified recipient cannot accept', async () => {
+    const r = request('alice', 'una')
+    await assertSucceeds(setDoc(doc(alice(), `connections/${r.id}`), r.data))
+    await assertFails(updateDoc(doc(una(), `connections/${r.id}`), { status: 'accepted', updatedAt: serverTimestamp() }))
+  })
+
   it('participants list their own connections; others cannot read them', async () => {
     const r = request('alice', 'carl')
     await assertSucceeds(setDoc(doc(alice(), `connections/${r.id}`), r.data))
