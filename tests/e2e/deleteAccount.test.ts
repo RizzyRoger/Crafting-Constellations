@@ -101,6 +101,11 @@ const seed = async () => {
   await db.doc(`dms/${pair}/messages/m1`).set(published(leaver, { text: 'Can we talk later?' }))
   await db.doc(`dms/${pair}/messages/m2`).set(published(friend, { text: 'Of course.' }))
 
+  // A private group chat with lines from both
+  await db.doc(`chats/c-${n}`).set({ name: 'Soup rota', uids: [leaver, friend], createdBy: leaver, createdAt: new Date(), lastMessageAt: new Date() })
+  await db.doc(`chats/c-${n}/messages/lc`).set(published(leaver, { text: 'Tuesday works.' }))
+  await db.doc(`chats/c-${n}/messages/fc`).set(published(friend, { text: 'Thursday for me.' }))
+
   // Review queue: the leaver's own item, a friend's reply under the leaver's post, a friend's private line
   await db.doc(queueDoc(`${g}/messages/lm`)).set({ contentPath: `${g}/messages/lm`, kind: 'groupMessage', authorUid: leaver, state: 'open' })
   await db.doc(queueDoc(`${g}/posts/lp/comments/fc`)).set({ contentPath: `${g}/posts/lp/comments/fc`, kind: 'comment', authorUid: friend, state: 'open' })
@@ -200,6 +205,8 @@ describe('deleteAccount', () => {
       `dms/${pair}`,
       `dms/${pair}/messages/m1`,
       `dms/${pair}/messages/m2`,
+      // their lines in a private group chat
+      `chats/c-${n}/messages/lc`,
       // queue items that would point at nothing, the licence application
       queueDoc(`${g}/messages/lm`),
       queueDoc(`${g}/posts/lp/comments/fc`),
@@ -219,6 +226,9 @@ describe('deleteAccount', () => {
       expect(await exists(path), path).toBe(true)
     }
     expect(await field(queueDoc(`${g}/posts/fp`), 'reports.reporterUids')).toEqual([])
+    // The private group chat carries on without them
+    expect(await exists(`chats/c-${n}/messages/fc`)).toBe(true)
+    expect(await field(`chats/c-${n}`, 'uids')).toEqual([friend])
 
     // Counters follow by trigger
     await eventually(async () => (await field(g, 'memberCount')) === 1, 'member count to drop')

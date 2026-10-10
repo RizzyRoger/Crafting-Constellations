@@ -283,7 +283,8 @@ service cloud.firestore {
         && nd().keys().hasOnly(['uid', 'name', 'data', 'authTime', 'state', 'createdAt'])
         && nd().uid == me()
         && nd().name in ['saveProfile', 'deleteAccount', 'approveContent', 'removeContent', 'banUser',
-                         'unbanUser', 'reviewProfessional', 'setAdmin', 'bootstrapAdmin', 'createGroup']
+                         'unbanUser', 'reviewProfessional', 'setAdmin', 'bootstrapAdmin', 'createGroup',
+                         'createChat']
         && nd().data is map && nd().data.size() <= 10
         && nd().authTime == request.auth.token.auth_time
         && nd().state == 'new'

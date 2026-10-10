@@ -23,15 +23,18 @@ const deleteTrees = async (refs: DocumentReference[]) => {
 // Everything a person leaves behind, except moderation evidence (bans, the
 // audit log, reports others filed). Safe to run again after a partial failure.
 export const purgeAccount = async (uid: string) => {
-  // 1. Cut off writing first: rules need a membership, a connection or a profile
-  const [memberships, connections, friendships, penNames, threadDocs] = await Promise.all([
+  // 1. Cut off writing first: rules need a membership, a connection, a chat seat or a profile
+  const [memberships, connections, friendships, penNames, threadDocs, chats] = await Promise.all([
     refsOf(db.collectionGroup('members').where('uid', '==', uid)),
     refsOf(db.collection('connections').where('uids', 'array-contains', uid)),
     refsOf(db.collection('friendships').where('uids', 'array-contains', uid)),
     refsOf(db.collection('penNames').where('uid', '==', uid)),
     refsOf(db.collection('dms').where('uids', 'array-contains', uid)),
+    refsOf(db.collection('chats').where('uids', 'array-contains', uid)),
   ])
   const access = await deleteAll([...memberships, ...connections, ...friendships, ...penNames])
+  // Private group chats carry on for everyone else; their own lines go in step 4
+  await Promise.all(chats.map((ref) => ref.update({ uids: FieldValue.arrayRemove(uid) })))
   await db.recursiveDelete(db.doc(`users/${uid}`)) // with private/settings and notices
 
   // 2. Their posts, with the replies and likes under them: replies answer their story
