@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
-import { getFirestore } from 'firebase-admin/firestore'
+import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
 
 initializeApp()
@@ -8,6 +8,13 @@ initializeApp()
 export const db = getFirestore()
 export const auth = getAuth()
 export const storage = getStorage()
+
+// gRPC status for a missing document (update() on a deleted doc)
+export const NOT_FOUND = 5
+
+// Audit log: who did what to whom (ids only)
+export const logAction = (actorUid: string, action: string, target: string, details: Record<string, unknown> = {}) =>
+  db.collection('adminActions').add({ actorUid, action, target, details, at: FieldValue.serverTimestamp() })
 
 // The nine pigments of the source sheet (mirrors src/wash/pigments.ts)
 export const PIGMENTS = ['paynesBlue', 'graphite', 'fresco', 'paynes', 'titanium', 'caliente', 'neutral', 'cool', 'warm'] as const

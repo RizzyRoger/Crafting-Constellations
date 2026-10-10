@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { HERO, HEAD } from '../wash/strokes'
 import { Wash } from '../wash/Wash'
@@ -147,6 +147,8 @@ const PhotoFrame = () => {
 
 export const Landing = () => {
   const { user, profile } = useAuth()
+  // Just deleted their account (see DeleteAccount)
+  const left = (useLocation().state as { left?: boolean } | null)?.left === true
   const studiesRef = useRef<HTMLElement>(null)
   const dotsRef = useRef<HTMLElement>(null)
   const reduce = reducedMotion()
@@ -192,6 +194,12 @@ export const Landing = () => {
           </>
         )}
       </div>
+
+      {left && (
+        <p className="landing__left pencil note" role="status">
+          Your account and your writing have been removed.
+        </p>
+      )}
 
       <section className="story story--open" aria-label="Crafting Constellations">
         <div className="story__intro">

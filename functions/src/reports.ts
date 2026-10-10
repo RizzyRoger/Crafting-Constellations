@@ -12,9 +12,9 @@ const couldSee = async (path: string, uid: string) => {
   return false
 }
 
-// A report puts the item in the review queue; three distinct people auto-hide it
-export const onReportCreated = onDocumentCreated({ document: 'reports/{rid}', retry: true }, async (event) => {
-  const report = event.data?.data()
+// A report puts the item in the review queue; three distinct people auto-hide it.
+// Safe to run twice for the same report (the local backend replays on restart).
+export const handleReport = async (report: FirebaseFirestore.DocumentData | undefined) => {
   if (!report) return
   const path: string = report.contentPath
   const kind = kindOf(path)
@@ -61,4 +61,6 @@ export const onReportCreated = onDocumentCreated({ document: 'reports/{rid}', re
       tx.update(contentRef, { status: 'held', heldReason: 'review' })
     }
   })
-})
+}
+
+export const onReportCreated = onDocumentCreated({ document: 'reports/{rid}', retry: true }, (event) => handleReport(event.data?.data()))

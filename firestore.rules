@@ -248,6 +248,25 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ---------- calls (local backend) ----------
+    // While Cloud Functions are unavailable, the site writes callable requests
+    // here and a backend on our own machine answers them in the same doc.
+    // authTime must match the caller's token, so the backend can trust it
+    // (deleteAccount needs a recent sign-in); everything else it reads from Auth.
+    match /calls/{callId} {
+      allow create: if signedIn()
+        && nd().keys().hasOnly(['uid', 'name', 'data', 'authTime', 'state', 'createdAt'])
+        && nd().uid == me()
+        && nd().name in ['saveProfile', 'deleteAccount', 'approveContent', 'removeContent', 'banUser',
+                         'unbanUser', 'reviewProfessional', 'setAdmin', 'bootstrapAdmin', 'createGroup']
+        && nd().data is map && nd().data.size() <= 10
+        && nd().authTime == request.auth.token.auth_time
+        && nd().state == 'new'
+        && nd().createdAt == request.time;
+      allow get, delete: if signedIn() && resource.data.uid == me();
+      allow list, update: if false;
+    }
+
     // ---------- admin-only ----------
     match /rateLimits/{uid}   { allow read, write: if false; }
     match /modQueue/{qid}     { allow read: if isAdmin(); allow write: if false; }
