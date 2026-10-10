@@ -21,7 +21,7 @@ interface TalkProps {
   people?: readonly Mentionable[]
 }
 
-// Live chat bubbles with a send bar underneath
+// Live chat bubbles with the send bar pinned under a full-height list
 export const Talk = ({
   path,
   me,
@@ -49,7 +49,7 @@ export const Talk = ({
   }
 
   return (
-    <div className="stack" style={{ gap: 20 }}>
+    <div className="stage">
       <div className="chat" aria-live="polite" aria-label={label}>
         {messages.data.length === 0 && !messages.loading && <p className="empty">{empty}</p>}
         {messages.data.map((m) => (

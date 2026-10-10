@@ -50,7 +50,7 @@ export const PostPage = () => {
   }
 
   return (
-    <div className="stack" style={{ gap: 28, maxWidth: 760 }}>
+    <div className="stack reading" style={{ gap: 28 }}>
       <Link to={`/groups/${groupId}?tab=posts`} className="code">
         ← {group.data?.name ?? 'Group'}
       </Link>
