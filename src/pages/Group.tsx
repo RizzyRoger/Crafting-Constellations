@@ -42,11 +42,7 @@ const Posts = ({ groupId, me, verified }: { groupId: string; me: string; verifie
         <p className="empty">No posts yet.</p>
       ) : (
         <ul className="post-list">
-          {posts.data.map((p) => {
-            // #region agent log
-            if (p.status === 'published' && !p.title) fetch('http://127.0.0.1:7404/ingest/adb60411-22ef-4c89-8427-3ded0fdd934d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'19dc83'},body:JSON.stringify({sessionId:'19dc83',hypothesisId:'D',location:'Group.tsx:post-link',message:'published post without a title',data:{verified,hasCommentLink:verified},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
-            return (
+          {posts.data.map((p) => (
             <li key={p.id}>
               <Item
                 item={p}
@@ -73,8 +69,7 @@ const Posts = ({ groupId, me, verified }: { groupId: string; me: string; verifie
                 <p className="voice">{p.body.length > 600 ? `${p.body.slice(0, 600)}…` : p.body}</p>
               </Item>
             </li>
-            );
-          })}
+          ))}
         </ul>
       )}
     </div>

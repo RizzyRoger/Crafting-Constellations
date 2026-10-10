@@ -9,12 +9,13 @@ const couldSee = async (path: string, uid: string) => {
   if (s[0] === 'users') return true
   if (s[0] === 'groups') return (await db.doc(`groups/${s[1]}/members/${uid}`).get()).exists
   if (s[0] === 'dms') return s[1].split('_').includes(uid)
+  if (s[0] === 'chats') return ((await db.doc(`chats/${s[1]}`).get()).data()?.uids ?? []).includes(uid)
   return false
 }
 
-// A report puts the item in the review queue; three distinct people auto-hide it
-export const onReportCreated = onDocumentCreated({ document: 'reports/{rid}', retry: true }, async (event) => {
-  const report = event.data?.data()
+// A report puts the item in the review queue; three distinct people auto-hide it.
+// Safe to run twice for the same report (the local backend replays on restart).
+export const handleReport = async (report: FirebaseFirestore.DocumentData | undefined) => {
   if (!report) return
   const path: string = report.contentPath
   const kind = kindOf(path)
@@ -44,7 +45,7 @@ export const onReportCreated = onDocumentCreated({ document: 'reports/{rid}', re
       {
         contentPath: path,
         kind,
-        ...(kind === 'dm' ? { pairId: segments[1] } : kind === 'profile' ? {} : { groupId: segments[1] }),
+        ...(kind === 'dm' ? { pairId: segments[1] } : kind === 'chatMessage' ? { chatId: segments[1] } : kind === 'profile' ? {} : { groupId: segments[1] }),
         authorUid,
         authorPenName: kind === 'profile' ? fresh?.penName ?? '' : fresh?.author?.penName ?? '',
         snapshot: kind === 'profile' ? { title: fresh?.penName ?? '', text: fresh?.note ?? '' } : { ...(fresh?.title ? { title: fresh.title } : {}), text: textOf(fresh) },
@@ -61,4 +62,6 @@ export const onReportCreated = onDocumentCreated({ document: 'reports/{rid}', re
       tx.update(contentRef, { status: 'held', heldReason: 'review' })
     }
   })
-})
+}
+
+export const onReportCreated = onDocumentCreated({ document: 'reports/{rid}', retry: true }, (event) => handleReport(event.data?.data()))

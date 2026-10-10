@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "demo-crafting-constellations"
+    "default": "demo-crafting-constellations",
+    "prod": "crafting-constellations-bf029"
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canReachOutTo, layoutEgo } from './egoLayout'
+import { layoutEgo } from './egoLayout'
 
 const input = {
   width: 800,
@@ -23,17 +23,15 @@ describe('ego layout', () => {
     expect(me.x).toBe(400)
     expect(me.y).toBe(300)
     expect(me.role).toBe('me')
-    expect(me.canReachOut).toBe(false)
   })
 
   it('draws friends and a friend’s friend, not the hop after that', () => {
     expect(layout.nodes.map((n) => n.uid).sort()).toEqual(['a', 'b', 'c', 'me'])
   })
 
-  it('does not offer a reach-out to a friend’s friend', () => {
+  it('places a friend’s friend one step further out', () => {
     const extended = layout.nodes.find((n) => n.uid === 'c')!
     expect(extended.role).toBe('extended')
-    expect(extended.canReachOut).toBe(false)
   })
 
   it('draws the friend’s own tie and stops there', () => {
@@ -51,11 +49,5 @@ describe('ego layout', () => {
 
   it('is deterministic', () => {
     expect(layoutEgo(input)).toEqual(layout)
-  })
-
-  it('lets you reach out to someone who is not already on the chart', () => {
-    expect(canReachOutTo('me', 'c', input.friendships, input.pending)).toBe(false)
-    expect(canReachOutTo('me', 'z', input.friendships, input.pending)).toBe(true)
-    expect(canReachOutTo('me', 'me', input.friendships, input.pending)).toBe(false)
   })
 })

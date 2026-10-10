@@ -273,6 +273,10 @@ p {
   border-bottom: 1px solid var(--rule);
 }
 
+.ruled-list--tight > li {
+  padding: 6px 0;
+}
+
 /* ---------- tabs as a pigment index ---------- */
 
 .tabs {
@@ -791,6 +795,23 @@ p {
   right: clamp(16px, 3vw, 40px);
   display: flex;
   gap: 14px;
+}
+
+/* After deleting an account: a quiet line at the top of the sheet, clear of the fixed buttons */
+.landing__left {
+  position: absolute;
+  z-index: 2;
+  top: 30px;
+  left: clamp(20px, 4vw, 56px);
+  right: clamp(220px, 24vw, 320px);
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .landing__left {
+    top: 78px;
+    right: 20px;
+  }
 }
 
 .story {
@@ -1634,5 +1655,37 @@ p {
 
   .bubble__box {
     max-width: 78%;
+  }
+}
+
+/* ---------- consent slip (counting visits) ---------- */
+
+.consent {
+  position: fixed;
+  left: var(--gutter);
+  bottom: 20px;
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+  width: min(380px, calc(100vw - 32px));
+  padding: 14px 16px 16px;
+  background: var(--paper-sheet);
+}
+
+.consent::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--pencil);
+  filter: url(#pencil);
+  pointer-events: none;
+}
+
+@media (max-width: 760px) {
+  .consent {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    width: auto;
   }
 }

@@ -6,6 +6,7 @@ import {
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing'
 import {
+  arrayRemove,
   collection,
   collectionGroup,
   deleteDoc,
@@ -210,6 +211,12 @@ describe('connections', () => {
     await assertSucceeds(updateDoc(doc(carl(), `connections/${r.id}`), { status: 'accepted', updatedAt: serverTimestamp() }))
   })
 
+  it('an unverified recipient cannot accept', async () => {
+    const r = request('alice', 'una')
+    await assertSucceeds(setDoc(doc(alice(), `connections/${r.id}`), r.data))
+    await assertFails(updateDoc(doc(una(), `connections/${r.id}`), { status: 'accepted', updatedAt: serverTimestamp() }))
+  })
+
   it('participants list their own connections; others cannot read them', async () => {
     const r = request('alice', 'carl')
     await assertSucceeds(setDoc(doc(alice(), `connections/${r.id}`), r.data))
@@ -251,6 +258,54 @@ describe('private messages', () => {
     await assertFails(getDoc(doc(carl(), `dms/${PAIR}/messages/m1`)))
     await assertFails(getDoc(doc(admin(), `dms/${PAIR}/messages/m1`)))
     await assertSucceeds(getDocs(query(collection(bob(), `dms/${PAIR}/messages`), where('status', '==', 'published'))))
+  })
+})
+
+describe('private group chats', () => {
+  const CHAT = 'chats/c1'
+
+  beforeEach(() =>
+    seed(async (db) => {
+      await setDoc(doc(db, CHAT), { name: 'Tuesday soup', uids: ['alice', 'bob', 'una', 'bea'], createdBy: 'alice' })
+      await setDoc(doc(db, `${CHAT}/messages/m1`), { authorUid: 'bob', text: 'hi', status: 'published', createdAt: new Date() })
+    }),
+  )
+
+  it('only verified members can open or list a chat', async () => {
+    await assertSucceeds(getDoc(doc(bob(), CHAT)))
+    await assertSucceeds(getDocs(query(collection(bob(), 'chats'), where('uids', 'array-contains', 'bob'))))
+    await assertFails(getDoc(doc(carl(), CHAT)))
+    await assertFails(getDoc(doc(una(), CHAT)))
+    await assertSucceeds(getDoc(doc(bob(), `${CHAT}/messages/m1`)))
+    await assertFails(getDoc(doc(carl(), `${CHAT}/messages/m1`)))
+    await assertSucceeds(getDocs(query(collection(alice(), `${CHAT}/messages`), where('status', '==', 'published'))))
+  })
+
+  it('chats are created by the function, never by clients', async () => {
+    await assertFails(setDoc(doc(alice(), 'chats/c2'), { name: 'Mine', uids: ['alice', 'bob'], createdBy: 'alice' }))
+    await assertFails(deleteDoc(doc(alice(), CHAT)))
+  })
+
+  it('members write pending notes as themselves; others cannot', async () => {
+    await assertSucceeds(setDoc(doc(collection(alice(), `${CHAT}/messages`)), pending('alice', { text: 'hello' })))
+    await assertFails(setDoc(doc(collection(alice(), `${CHAT}/messages`)), { ...pending('alice', { text: 'x' }), status: 'published' }))
+    await assertFails(setDoc(doc(collection(alice(), `${CHAT}/messages`)), pending('bob', { text: 'x' })))
+    await assertFails(setDoc(doc(collection(carl(), `${CHAT}/messages`)), pending('carl', { text: 'x' })))
+    await assertFails(setDoc(doc(collection(una(), `${CHAT}/messages`)), pending('una', { text: 'x' })))
+    await assertFails(setDoc(doc(collection(banned(), `${CHAT}/messages`)), pending('bea', { text: 'x' })))
+  })
+
+  it('a member can leave, but cannot remove or add anyone else', async () => {
+    await assertFails(updateDoc(doc(alice(), CHAT), { uids: ['alice', 'una', 'bea'] }))
+    await assertFails(updateDoc(doc(alice(), CHAT), { uids: ['alice', 'bob', 'una', 'bea', 'carl'] }))
+    await assertFails(updateDoc(doc(alice(), CHAT), { name: 'Renamed' }))
+    await assertSucceeds(updateDoc(doc(bob(), CHAT), { uids: arrayRemove('bob') }))
+    await assertFails(getDoc(doc(bob(), `${CHAT}/messages/m1`)))
+  })
+
+  it('chat notes can be reported', async () => {
+    const report = { reporterUid: 'alice', contentPath: `${CHAT}/messages/m1`, reason: 'harassment', createdAt: serverTimestamp() }
+    await assertSucceeds(setDoc(doc(collection(alice(), 'reports')), report))
   })
 })
 
@@ -300,5 +355,43 @@ describe('professional applications', () => {
     await assertSucceeds(getDoc(doc(alice(), 'proApplications/alice')))
     await assertSucceeds(getDoc(doc(admin(), 'proApplications/alice')))
     await assertFails(getDoc(doc(bob(), 'proApplications/alice')))
+  })
+})
+
+describe('calls (local backend)', () => {
+  const AUTH_TIME = 1_800_000_000
+  const caller = (uid: string) => as(uid, { email_verified: true, auth_time: AUTH_TIME })
+  const call = (uid: string, extra: Record<string, unknown> = {}) => ({
+    uid,
+    name: 'saveProfile',
+    data: { penName: 'Quiet Heron' },
+    authTime: AUTH_TIME,
+    state: 'new',
+    createdAt: serverTimestamp(),
+    ...extra,
+  })
+
+  it('a person can ask for a known call as themselves, with their real sign-in time', async () => {
+    await assertSucceeds(setDoc(doc(caller('alice'), 'calls/c1'), call('alice')))
+  })
+
+  it('refuses calls made in someone else’s name, with a forged sign-in time, an unknown name, or an answer filled in', async () => {
+    await assertFails(setDoc(doc(caller('alice'), 'calls/c1'), call('bob')))
+    await assertFails(setDoc(doc(caller('alice'), 'calls/c2'), call('alice', { authTime: AUTH_TIME + 3600 })))
+    await assertFails(setDoc(doc(caller('alice'), 'calls/c3'), call('alice', { name: 'grantEverything' })))
+    await assertFails(setDoc(doc(caller('alice'), 'calls/c4'), call('alice', { state: 'done' })))
+    await assertFails(setDoc(doc(caller('alice'), 'calls/c5'), call('alice', { result: { ok: true } })))
+    await assertFails(setDoc(doc(collection(env.unauthenticatedContext().firestore() as unknown as Firestore, 'calls')), call('alice')))
+  })
+
+  it('only the caller reads or removes their call, and nobody lists or answers calls from the client', async () => {
+    await seed((db) => setDoc(doc(db, 'calls/c1'), { ...call('alice'), createdAt: new Date() }))
+    await assertSucceeds(getDoc(doc(caller('alice'), 'calls/c1')))
+    await assertFails(getDoc(doc(caller('bob'), 'calls/c1')))
+    await assertFails(getDoc(doc(admin(), 'calls/c1')))
+    await assertFails(getDocs(collection(caller('alice'), 'calls')))
+    await assertFails(updateDoc(doc(caller('alice'), 'calls/c1'), { state: 'done' }))
+    await assertFails(deleteDoc(doc(caller('bob'), 'calls/c1')))
+    await assertSucceeds(deleteDoc(doc(caller('alice'), 'calls/c1')))
   })
 })

@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { describeError } from '../lib/callables'
 import { auth } from '../lib/firebase'
+import { trackSignIn } from '../lib/telemetry'
 import { AuthLayout } from './AuthLayout'
 
 export const SignIn = () => {
@@ -20,7 +21,7 @@ export const SignIn = () => {
     setBusy(true)
     setError(null)
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password)
+      trackSignIn(await signInWithEmailAndPassword(auth, email.trim(), password), 'password')
       navigate(next, { replace: true })
     } catch (e) {
       setError(describeError(e))
@@ -32,7 +33,7 @@ export const SignIn = () => {
   const google = async () => {
     setError(null)
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider())
+      trackSignIn(await signInWithPopup(auth, new GoogleAuthProvider()), 'google')
       navigate(next, { replace: true })
     } catch (e) {
       setError(describeError(e))

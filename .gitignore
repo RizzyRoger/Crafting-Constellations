@@ -6,6 +6,8 @@ functions/node_modules
 .env.*.local
 *.log
 .emulator-data
+# Firebase CLI deploy cache
+.firebase/
 firebase-debug*.log
 firestore-debug.log
 ui-debug.log
@@ -14,5 +16,11 @@ ui-debug.log
 # Local editor/agent tooling
 .claude/
 *-debug.log
+# Real-project function parameters hold people's emails; only the emulator file and the template are shared
+functions/.env.*
 # Emulator-only parameters (no secrets): who may bootstrap the first moderator locally
 !functions/.env.local
+!functions/.env.example
+
+# Backend bundle for the NUC (holds the moderator list)
+*.tgz

@@ -1,4 +1,4 @@
-import { deleteDoc, doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
+import { arrayRemove, deleteDoc, doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
 import { db } from './firebase'
 import { pairIdOf } from './pair'
 
@@ -31,3 +31,8 @@ export const joinGroup = (groupId: string, me: string) =>
   setDoc(doc(db, `groups/${groupId}/members/${me}`), { uid: me, joinedAt: serverTimestamp() })
 
 export const leaveGroup = (groupId: string, me: string) => deleteDoc(doc(db, `groups/${groupId}/members/${me}`))
+
+// Private group chats -------------------------------------------------------
+
+// Created by the createChat function; anyone in one can take themself off it
+export const leaveChat = (chatId: string, me: string) => updateDoc(doc(db, 'chats', chatId), { uids: arrayRemove(me) })
