@@ -1,5 +1,19 @@
 # Crafting Constellations — web app (Firebase)
 
+## Notifications, @mentions, seamless paper, draggable chart (2026-10-10)
+
+Plan: `/Users/darren/.claude/plans/i-want-you-to-quiet-stardust.md`
+
+- [x] 0. Synced with main (7099d22: private group chats)
+- [x] 1. Paper grain tiles without seams (filter region pinned to the tile). Mottle tile edge step: 32× the inside step before, ordinary noise after (81st–90th percentile of its own rows/columns)
+- [ ] 2. Notifications + @mentions
+  - [ ] shared `mentions.ts` (+ tests)
+  - [ ] server: `notify.ts` in `handleNewContent` and `approveContent`; accepted notices; purge; rules; index
+  - [ ] client: Composer autocomplete, `MentionText`, Notifications page, rail link, Me cleanup
+  - [ ] tests: unit, rules, local-backend e2e, deleteAccount e2e
+- [ ] 3. Draggable Friends chart (spring physics, your dot fixed)
+- [ ] 4. Verify: typecheck, unit, rules, e2e, build, browser (two people, 375px + desktop)
+
 ## Reach out, Accept, and private group chats (2026-10-10)
 
 Plan: `/Users/darren/.claude/plans/this-site-is-looking-giggly-robin.md`
