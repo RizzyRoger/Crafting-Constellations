@@ -23,10 +23,11 @@ Plan: `/Users/darren/.claude/plans/i-want-you-to-quiet-stardust.md`
 
 - **Delivered:** seamless paper; Notifications page (requests, mentions, comments on your posts, accepted requests, moderator notes) with an unread count in the rail; @mentions in group talk, posts, comments and private group chats; draggable Friends chart.
 - **Decisions:** pings are checked and written by functions when writing is published (held writing pings nobody until approved); notices hold no copy of the words; moderator notes moved from You to Notifications; DMs have no @ (both people already see every line); the chart has no pull back home, so a dropped dot keeps its new angle.
-- **Not done / follow-ups:**
-  - acceptances that happen while the local backend is off aren't announced (it learns statuses from its first snapshot);
-  - `origin/fill-app-panes` (unmerged) touches the same lines in Group/Post/Thread and app.css: expect small conflicts whichever lands second;
-  - moderation folds `@` to `a` (leet), so `@` + a pen name is read as one word by automod; harmless today, worth a look if a name ever trips it.
+- **Fixed before the PR (user: "fix the bugs"):**
+  - the local backend now announces acceptances from the last 3 days on start (`acceptedWhileAway`; the notice id makes each one once only), e2e covered;
+  - automod read a word-initial `@` as "a", so "love you @Loser" slipped past where "love you Loser" is held. A fourth view drops that `@` (`unmarked`); "@ss"-style leet is still read by the old view. Probed: no real pen name is newly held by it;
+  - merged main with `fill-app-panes` (PR #5, full-height panes): no conflicts; the @ list opens inside the pane, on top of the chat, unclipped (checked in the browser).
+- Verified after: unit 133, rules 48, local-backend e2e 11, deleteAccount e2e 5, typecheck, both builds.
 
 ## Reach out, Accept, and private group chats (2026-10-10)
 
