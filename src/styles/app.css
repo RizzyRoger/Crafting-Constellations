@@ -267,6 +267,10 @@ p {
   border-bottom: 1px solid var(--rule);
 }
 
+.ruled-list--tight > li {
+  padding: 6px 0;
+}
+
 /* ---------- tabs as a pigment index ---------- */
 
 .tabs {
@@ -778,6 +782,12 @@ p {
 
 .wire-btn:hover {
   background: var(--paper-warm);
+}
+
+/* After deleting an account: a first row across the whole sheet */
+.landing__left {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .landing__title {
@@ -1379,5 +1389,37 @@ p {
 
   .bubble__box {
     max-width: 78%;
+  }
+}
+
+/* ---------- consent slip (counting visits) ---------- */
+
+.consent {
+  position: fixed;
+  left: var(--gutter);
+  bottom: 20px;
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+  width: min(380px, calc(100vw - 32px));
+  padding: 14px 16px 16px;
+  background: var(--paper-sheet);
+}
+
+.consent::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--pencil);
+  filter: url(#pencil);
+  pointer-events: none;
+}
+
+@media (max-width: 760px) {
+  .consent {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    width: auto;
   }
 }

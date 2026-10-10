@@ -1,9 +1,10 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { StarChart } from '../components/StarChart'
 
 export const Landing = () => {
   const { user, profile } = useAuth()
+  const left = (useLocation().state as { left?: boolean } | null)?.left === true
 
   return (
     <div className="landing">
@@ -23,6 +24,12 @@ export const Landing = () => {
           </>
         )}
       </div>
+
+      {left && (
+        <p className="landing__left pencil note" role="status">
+          Your account and your writing have been removed.
+        </p>
+      )}
 
       <h1 className="landing__title">
         Crafting

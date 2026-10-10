@@ -24,12 +24,24 @@
     { "collectionGroup": "members", "fieldPath": "uid", "indexes": [
       { "order": "ASCENDING", "queryScope": "COLLECTION" }, { "order": "DESCENDING", "queryScope": "COLLECTION" },
       { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" }, { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" } ] },
+    { "collectionGroup": "likes", "fieldPath": "uid", "indexes": [
+      { "order": "ASCENDING", "queryScope": "COLLECTION" }, { "order": "DESCENDING", "queryScope": "COLLECTION" },
+      { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" }, { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" } ] },
     { "collectionGroup": "posts", "fieldPath": "authorUid", "indexes": [
       { "order": "ASCENDING", "queryScope": "COLLECTION" }, { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" } ] },
     { "collectionGroup": "comments", "fieldPath": "authorUid", "indexes": [
       { "order": "ASCENDING", "queryScope": "COLLECTION" }, { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" } ] },
     { "collectionGroup": "messages", "fieldPath": "authorUid", "indexes": [
       { "order": "ASCENDING", "queryScope": "COLLECTION" }, { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" } ] },
+    { "collectionGroup": "posts", "fieldPath": "status", "indexes": [
+      { "order": "ASCENDING", "queryScope": "COLLECTION" }, { "order": "DESCENDING", "queryScope": "COLLECTION" },
+      { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" }, { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" } ] },
+    { "collectionGroup": "comments", "fieldPath": "status", "indexes": [
+      { "order": "ASCENDING", "queryScope": "COLLECTION" }, { "order": "DESCENDING", "queryScope": "COLLECTION" },
+      { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" }, { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" } ] },
+    { "collectionGroup": "messages", "fieldPath": "status", "indexes": [
+      { "order": "ASCENDING", "queryScope": "COLLECTION" }, { "order": "DESCENDING", "queryScope": "COLLECTION" },
+      { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" }, { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" } ] },
     { "collectionGroup": "posts", "fieldPath": "body", "indexes": [] },
     { "collectionGroup": "comments", "fieldPath": "text", "indexes": [] },
     { "collectionGroup": "messages", "fieldPath": "text", "indexes": [] },

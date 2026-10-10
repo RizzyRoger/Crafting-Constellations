@@ -20,9 +20,11 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        // Firebase and React change rarely; keep them cacheable apart from app code
+        // Firebase and React change rarely; keep them cacheable apart from app code.
+        // Analytics + Performance load only after someone agrees to be counted.
         manualChunks: {
-          firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/functions', 'firebase/storage'],
+          firebase: ['firebase/app', 'firebase/app-check', 'firebase/auth', 'firebase/firestore', 'firebase/functions', 'firebase/storage'],
+          telemetry: ['firebase/analytics', 'firebase/performance'],
           react: ['react', 'react-dom', 'react-router-dom'],
         },
       },

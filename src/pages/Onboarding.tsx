@@ -1,4 +1,4 @@
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { ProfileForm } from '../components/ProfileForm'
 import { AuthLayout } from './AuthLayout'
@@ -18,6 +18,9 @@ export const Onboarding = () => {
       <ProfileForm uid={user.uid} submitLabel="Open my constellation" onSaved={() => navigate('/constellation')} />
       <p className="code">
         A licensed mental health professional? Choose a pen name first, then apply from “Professionals”.
+      </p>
+      <p className="code">
+        Not for you? <Link to="/delete-account">Delete this sign-in</Link>
       </p>
     </AuthLayout>
   )

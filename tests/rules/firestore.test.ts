@@ -291,3 +291,41 @@ describe('professional applications', () => {
     await assertFails(getDoc(doc(bob(), 'proApplications/alice')))
   })
 })
+
+describe('calls (local backend)', () => {
+  const AUTH_TIME = 1_800_000_000
+  const caller = (uid: string) => as(uid, { email_verified: true, auth_time: AUTH_TIME })
+  const call = (uid: string, extra: Record<string, unknown> = {}) => ({
+    uid,
+    name: 'saveProfile',
+    data: { penName: 'Quiet Heron' },
+    authTime: AUTH_TIME,
+    state: 'new',
+    createdAt: serverTimestamp(),
+    ...extra,
+  })
+
+  it('a person can ask for a known call as themselves, with their real sign-in time', async () => {
+    await assertSucceeds(setDoc(doc(caller('alice'), 'calls/c1'), call('alice')))
+  })
+
+  it('refuses calls made in someone else’s name, with a forged sign-in time, an unknown name, or an answer filled in', async () => {
+    await assertFails(setDoc(doc(caller('alice'), 'calls/c1'), call('bob')))
+    await assertFails(setDoc(doc(caller('alice'), 'calls/c2'), call('alice', { authTime: AUTH_TIME + 3600 })))
+    await assertFails(setDoc(doc(caller('alice'), 'calls/c3'), call('alice', { name: 'grantEverything' })))
+    await assertFails(setDoc(doc(caller('alice'), 'calls/c4'), call('alice', { state: 'done' })))
+    await assertFails(setDoc(doc(caller('alice'), 'calls/c5'), call('alice', { result: { ok: true } })))
+    await assertFails(setDoc(doc(collection(env.unauthenticatedContext().firestore() as unknown as Firestore, 'calls')), call('alice')))
+  })
+
+  it('only the caller reads or removes their call, and nobody lists or answers calls from the client', async () => {
+    await seed((db) => setDoc(doc(db, 'calls/c1'), { ...call('alice'), createdAt: new Date() }))
+    await assertSucceeds(getDoc(doc(caller('alice'), 'calls/c1')))
+    await assertFails(getDoc(doc(caller('bob'), 'calls/c1')))
+    await assertFails(getDoc(doc(admin(), 'calls/c1')))
+    await assertFails(getDocs(collection(caller('alice'), 'calls')))
+    await assertFails(updateDoc(doc(caller('alice'), 'calls/c1'), { state: 'done' }))
+    await assertFails(deleteDoc(doc(caller('bob'), 'calls/c1')))
+    await assertSucceeds(deleteDoc(doc(caller('alice'), 'calls/c1')))
+  })
+})

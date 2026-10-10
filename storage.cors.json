@@ -1,0 +1,14 @@
+[
+  {
+    "origin": [
+      "https://craftingconstellations.com",
+      "https://www.craftingconstellations.com",
+      "https://crafting-constellations-bf029.web.app",
+      "https://crafting-constellations-bf029.firebaseapp.com",
+      "http://127.0.0.1:5173"
+    ],
+    "method": ["GET"],
+    "responseHeader": ["Content-Type", "Authorization", "X-Firebase-AppCheck", "X-Firebase-Storage-Version", "X-Firebase-GMPID"],
+    "maxAgeSeconds": 3600
+  }
+]

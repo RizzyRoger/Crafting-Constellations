@@ -15,5 +15,5 @@
     "noUnusedParameters": true,
     "types": ["node"]
   },
-  "include": ["vite.config.ts", "vitest.config.ts", "vitest.rules.config.ts", "scripts", "tests", "src/**/*.test.ts", "functions/src/**/*.test.ts"]
+  "include": ["vite.config.ts", "vitest.config.ts", "vitest.rules.config.ts", "vitest.e2e.config.ts", "scripts", "tests", "src/**/*.test.ts", "functions/src/**/*.test.ts"]
 }

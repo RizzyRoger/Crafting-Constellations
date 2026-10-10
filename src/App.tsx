@@ -1,12 +1,15 @@
 import { lazy, Suspense } from 'react'
-import { createBrowserRouter, Outlet, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, Outlet, RouterProvider, type RouteObject } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthProvider'
 import { Gate } from './auth/Gate'
+import { ConsentNote } from './components/ConsentNote'
+import { PageViews } from './components/PageViews'
 import { PencilDefs } from './components/PencilDefs'
 import { Quiet } from './components/Quiet'
 import { Shell } from './components/Shell'
 import { AdminClaim } from './pages/AdminClaim'
 import { Constellation } from './pages/Constellation'
+import { DeleteAccount } from './pages/DeleteAccount'
 import { Group } from './pages/Group'
 import { Landing } from './pages/Landing'
 import { Me } from './pages/Me'
@@ -26,7 +29,9 @@ const Admin = lazy(() => import('./pages/Admin').then((m) => ({ default: m.Admin
 const Root = () => (
   <AuthProvider>
     <PencilDefs />
+    <PageViews routes={routes} />
     <Outlet />
+    <ConsentNote />
   </AuthProvider>
 )
 
@@ -39,7 +44,7 @@ const Inside = () => (
   </Gate>
 )
 
-const router = createBrowserRouter([
+const routes: RouteObject[] = [
   {
     element: <Root />,
     children: [
@@ -48,6 +53,8 @@ const router = createBrowserRouter([
       { path: '/signup', element: <SignUp /> },
       { path: '/verify', element: <Gate need="signedIn"><Verify /></Gate> },
       { path: '/onboarding', element: <Gate need="signedIn"><Onboarding /></Gate> },
+      // Outside the profile gate: the profile disappears partway through deleting
+      { path: '/delete-account', element: <Gate need="signedIn"><DeleteAccount /></Gate> },
       {
         element: <Inside />,
         children: [
@@ -74,6 +81,8 @@ const router = createBrowserRouter([
       { path: '*', element: <NotFound /> },
     ],
   },
-])
+]
+
+const router = createBrowserRouter(routes)
 
 export const App = () => <RouterProvider router={router} />

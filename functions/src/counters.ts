@@ -1,12 +1,10 @@
 import { FieldValue } from 'firebase-admin/firestore'
 import { onDocumentWritten } from 'firebase-functions/v2/firestore'
-import { db } from './app.js'
+import { db, NOT_FOUND } from './app.js'
 
 const existed = (snap: { exists: boolean } | undefined) => Number(snap?.exists ?? false)
 const published = (snap: { data: () => FirebaseFirestore.DocumentData | undefined } | undefined) =>
   Number(snap?.data()?.status === 'published')
-
-const NOT_FOUND = 5
 
 // update, never set: a late delete-trigger must not resurrect a removed parent
 const bump = async (path: string, field: string, delta: number) => {
