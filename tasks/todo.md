@@ -17,7 +17,16 @@ Plan: `/Users/darren/.claude/plans/i-want-you-to-quiet-stardust.md`
   - `egoPhysics.ts`: line springs at their drawn length, a push between dots (capped up close), you pinned; settled before the first paint; a dropped dot keeps its new angle, not its old place (no pull home, like Obsidian)
   - browser at 393px: a real mouse drag lands under the pointer, neighbours follow, release drifts to rest (~6s at most), the drag doesn't open the sheet, a click still does, your dot can't move; labels kept inside the edges
   - Found while checking: a quick drag can end before the next frame, so the held dot is placed on each move, not only per frame
-- [ ] 4. Verify: typecheck, unit, rules, e2e, build, browser (two people, 375px + desktop)
+- [x] 4. Verify: typecheck, functions build, unit 124, rules 48, local-backend e2e 10, deleteAccount e2e 5, build; browser as above. Run on separate emulator ports beside the main checkout's suite.
+
+### Review
+
+- **Delivered:** seamless paper; Notifications page (requests, mentions, comments on your posts, accepted requests, moderator notes) with an unread count in the rail; @mentions in group talk, posts, comments and private group chats; draggable Friends chart.
+- **Decisions:** pings are checked and written by functions when writing is published (held writing pings nobody until approved); notices hold no copy of the words; moderator notes moved from You to Notifications; DMs have no @ (both people already see every line); the chart has no pull back home, so a dropped dot keeps its new angle.
+- **Not done / follow-ups:**
+  - acceptances that happen while the local backend is off aren't announced (it learns statuses from its first snapshot);
+  - `origin/fill-app-panes` (unmerged) touches the same lines in Group/Post/Thread and app.css: expect small conflicts whichever lands second;
+  - moderation folds `@` to `a` (leet), so `@` + a pen name is read as one word by automod; harmless today, worth a look if a name ever trips it.
 
 ## Reach out, Accept, and private group chats (2026-10-10)
 
