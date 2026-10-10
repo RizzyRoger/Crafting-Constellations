@@ -71,8 +71,8 @@ export const purgeAccount = async (uid: string) => {
   const reported = await refsOf(db.collection('modQueue').where('reports.reporterUids', 'array-contains', uid))
   await Promise.all(reported.map((ref) => ref.update({ 'reports.reporterUids': FieldValue.arrayRemove(uid) })))
 
-  // 6. Licence application and its documents
-  const application = await deleteAll([db.doc(`proApplications/${uid}`)])
+  // 6. Licence application and its documents; their posting-rate stamps
+  const application = await deleteAll([db.doc(`proApplications/${uid}`), db.doc(`rateLimits/${uid}`)])
   // No bucket configured (Storage not set up, e.g. the local backend) means no documents to delete
   const bucket = storage.app.options.storageBucket
   if (bucket) {

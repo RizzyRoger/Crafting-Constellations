@@ -88,9 +88,9 @@ The live site is **craftingconstellations.com** on Firebase Hosting.
 5. **Google Analytics admin** (analytics.google.com) → the web data stream:
    - **Enhanced measurement off.** It would send real page addresses.
    - **Google signals off**, and data retention set to 2 months.
-6. **App Check (optional, off for this project).** The code is in place and stays off until `VITE_APPCHECK_SITE_KEY` is set. To turn it on:
-   - Google Cloud console → Security → reCAPTCHA → create a **Website** key (no checkbox challenge) for `craftingconstellations.com`, `<project-id>.web.app` and `<project-id>.firebaseapp.com`.
-   - Put the key id in `VITE_APPCHECK_SITE_KEY`, then register it under Firebase → App Check → your web app.
+6. **App Check (optional, off for this project).** The code is in place (reCAPTCHA v3) and stays off until `VITE_APPCHECK_SITE_KEY` is set. To turn it on:
+   - https://www.google.com/recaptcha/admin → create a **Score based (v3)** key for `craftingconstellations.com`, `<project-id>.web.app` and `<project-id>.firebaseapp.com`.
+   - Put the **site key** in `VITE_APPCHECK_SITE_KEY`. In Firebase → App Check → your web app → **reCAPTCHA**, paste the **secret key**.
    - App Check → ⋮ → **Manage debug tokens** → add one, and put it in `.env.live.local` as `VITE_APPCHECK_DEBUG_TOKEN`. It's a secret: never in `.env.local`, never committed.
    - Don't enforce until the metrics look good (step 5).
 7. **Performance → Get started.**
@@ -273,7 +273,7 @@ People can change their answer under **You → Account**.
 - their comments, group messages and likes;
 - private threads, both sides;
 - reports they filed, and review-queue items that would point at nothing;
-- their licence application and documents;
+- their licence application and documents, and their posting-rate stamps;
 - the sign-in itself.
 
 Ban records and the audit log stay; the audit row holds ids and counts only. Moderators can't delete themselves; another moderator has to remove their role first.

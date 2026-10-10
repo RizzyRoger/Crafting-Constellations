@@ -42,6 +42,11 @@ User's choices: a request queue in Firestore (no inbound ports or tunnel); runs 
 - [x] Live database was empty: created the starter set (3 constellations, 8 groups, the seed's names without sample people) in one atomic commit with `exists:false` preconditions, using the CLI owner login
 - [ ] User: sign up on the live site and choose a pen name. Then check `calls`, `users` and `penNames` from here.
 - [ ] Follow-up: there is no admin screen for creating constellations or groups (the `createGroup` callable exists but has no UI)
+- [x] Live test: a pen name saved through the NUC (1 profile, matching pen name, no leftover calls)
+- [x] Merged main (91616de: landing story, a confirmed email to write, flood hold with `rateLimits`):
+  - conflicts resolved: App Check uses Roger's reCAPTCHA v3 provider with my init order and env hygiene; Roger's landing plus the "account removed" line, repositioned for his fixed buttons;
+  - `rateLimits/{uid}` is now purged on account deletion;
+  - after the merge: unit tests 80, rules 36, deleteAccount e2e 5, local-backend e2e 6, both builds; landing checked at 297px and 1280px.
 - Verified:
   - rules tests 34 (3 new for `calls`);
   - local-backend e2e 6 (pen name, error details, admin refusal + bootstrapAdmin, deleteAccount with the rules-checked sign-in time, expired calls never run, moderation + counters);

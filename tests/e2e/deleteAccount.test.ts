@@ -109,6 +109,9 @@ const seed = async () => {
   // A report the leaver filed about the friend's post (the trigger queues it)
   await db.collection('reports').add({ reporterUid: leaver, contentPath: `${g}/posts/fp`, reason: 'other', details: 'test', createdAt: new Date() })
 
+  // Posting-rate stamps (written by moderation)
+  await db.doc(`rateLimits/${leaver}`).set({ stamps: [Date.now()], updatedAt: new Date() })
+
   // A licence application with a document
   await db.doc(`proApplications/${leaver}`).set({ uid: leaver, status: 'submitted', legalName: 'Test Person', files: ['doc-1'] })
   await bucket.file(`proDocs/${leaver}/doc-1`).save(Buffer.from('%PDF-1.4\n%%EOF\n'), { contentType: 'application/pdf' })
@@ -202,6 +205,7 @@ describe('deleteAccount', () => {
       queueDoc(`${g}/posts/lp/comments/fc`),
       queueDoc(`dms/${pair}/messages/m2`),
       `proApplications/${leaver}`,
+      `rateLimits/${leaver}`,
     ]) {
       expect(await exists(path), path).toBe(false)
     }
