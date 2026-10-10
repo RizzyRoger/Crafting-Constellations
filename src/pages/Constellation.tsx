@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { Quiet } from '../components/Quiet'
 import { ConstellationList } from '../constellation/ConstellationList'
+import { ConstellationMap } from '../constellation/ConstellationMap'
 import { EgoMap } from '../constellation/EgoMap'
 import { canReachOutTo, type EgoTie } from '../constellation/egoLayout'
 import { PersonSheet } from '../constellation/PersonSheet'
@@ -11,14 +12,20 @@ import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import type { Connection, Constellation as ConstellationDoc, Group, Profile } from '../lib/types'
 
-type View = 'chart' | 'list'
+type View = 'friends' | 'groups' | 'list'
+
+const VIEWS: { id: View; label: string }[] = [
+  { id: 'friends', label: 'Friends' },
+  { id: 'groups', label: 'Groups' },
+  { id: 'list', label: 'List' },
+]
 
 const asTie = (id: string, uids: string[]): EgoTie | null => (uids.length === 2 ? { id, uids: [uids[0], uids[1]] } : null)
 
 export const Constellation = () => {
   const { uid, claims } = useMe()
   const [params, setParams] = useSearchParams()
-  const [view, setView] = useState<View>('chart')
+  const [view, setView] = useState<View>('friends')
   const [selected, setSelected] = useState<string | null>(params.get('person'))
 
   useEffect(() => {
@@ -67,6 +74,12 @@ export const Constellation = () => {
   const incoming = connections.data.filter((c) => c.status === 'pending' && c.recipient === uid)
   const loading = constellations.loading || groups.loading || people.loading || friendships.loading
 
+  useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7404/ingest/adb60411-22ef-4c89-8427-3ded0fdd934d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'19dc83'},body:JSON.stringify({sessionId:'19dc83',hypothesisId:'C',location:'Constellation.tsx:view',message:'constellation data',data:{view,loading,constellations:constellations.data.length,groups:groups.data.length,people:visiblePeople.length,friendships:friendshipTies.length,errors:{constellations:constellations.error?.message??null,groups:groups.error?.message??null,people:people.error?.message??null,friendships:friendships.error?.message??null}},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+  }, [view, loading, constellations.data.length, groups.data.length, visiblePeople.length, friendshipTies.length, constellations.error, groups.error, people.error, friendships.error])
+
   const closeSheet = () => {
     setSelected(null)
     if (params.get('person')) {
@@ -90,9 +103,9 @@ export const Constellation = () => {
       )}
 
       <div className="view-switch" role="tablist" aria-label="View">
-        {(['chart', 'list'] as const).map((v) => (
-          <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}>
-            {v === 'chart' ? 'Chart' : 'List'}
+        {VIEWS.map((v) => (
+          <button key={v.id} type="button" role="tab" aria-selected={view === v.id} onClick={() => setView(v.id)}>
+            {v.label}
           </button>
         ))}
       </div>
@@ -101,7 +114,7 @@ export const Constellation = () => {
         <Quiet>Laying out the chart…</Quiet>
       ) : (
         <div className="constellation">
-          {view === 'chart' ? (
+          {view === 'friends' ? (
             <EgoMap
               me={uid}
               people={visiblePeople}
@@ -109,6 +122,21 @@ export const Constellation = () => {
               pending={pendingTies}
               blocked={blocked}
               sharedGroups={sharedGroups}
+              selected={selected}
+              onSelect={setSelected}
+            />
+          ) : view === 'groups' ? (
+            <ConstellationMap
+              constellations={constellations.data}
+              groups={groups.data}
+              memberships={memberships}
+              people={visiblePeople}
+              lines={[
+                ...friendshipTies.map((tie) => ({ ...tie, status: 'accepted' as const })),
+                ...pendingTies.map((tie) => ({ ...tie, status: 'pending' as const })),
+              ]}
+              me={uid}
+              myGroupIds={myGroupIds}
               selected={selected}
               onSelect={setSelected}
             />

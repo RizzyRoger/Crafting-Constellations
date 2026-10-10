@@ -113,6 +113,12 @@ describe('posts', () => {
     await assertSucceeds(setDoc(doc(posts(alice())), pending('alice', { body: 'first post' })))
   })
 
+  it('an unverified member cannot post or talk in the group', async () => {
+    await assertFails(setDoc(doc(posts(una())), pending('una', { body: 'x' })))
+    await assertFails(setDoc(doc(collection(una(), `${GROUP}/messages`)), pending('una', { text: 'x' })))
+    await assertSucceeds(setDoc(doc(collection(alice(), `${GROUP}/messages`)), pending('alice', { text: 'hello' })))
+  })
+
   it('rejects forged status, author snapshot, or someone else as author', async () => {
     await assertFails(setDoc(doc(posts(alice())), { ...pending('alice', { body: 'x' }), status: 'published' }))
     await assertFails(setDoc(doc(posts(alice())), pending('alice', { body: 'x', author: { penName: 'A', pro: true } })))
@@ -159,6 +165,11 @@ describe('comments and likes', () => {
   it('comments need a published parent', async () => {
     await assertSucceeds(setDoc(doc(collection(alice(), `${GROUP}/posts/pub/comments`)), pending('alice', { text: 'with you' })))
     await assertFails(setDoc(doc(collection(alice(), `${GROUP}/posts/pend/comments`)), pending('alice', { text: 'x' })))
+  })
+
+  it('an unverified member cannot comment or like', async () => {
+    await assertFails(setDoc(doc(collection(una(), `${GROUP}/posts/pub/comments`)), pending('una', { text: 'x' })))
+    await assertFails(setDoc(doc(una(), `${GROUP}/posts/pub/likes/una`), { uid: 'una', createdAt: serverTimestamp() }))
   })
 
   it('one like per person, on published posts only', async () => {

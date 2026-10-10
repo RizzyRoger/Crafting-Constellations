@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app'
-import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check'
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { connectAuthEmulator, getAuth } from 'firebase/auth'
 import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore'
 import { connectFunctionsEmulator, getFunctions } from 'firebase/functions'
@@ -22,15 +22,15 @@ export const app = initializeApp({
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || undefined,
 })
 
-// Before any other service, so Firestore, Storage and Functions carry a token from their first request.
-// Off on the emulators (they never check) and until a site key exists.
+// Production bot check (reCAPTCHA v3). Before any other service, so Firestore, Storage and Functions
+// carry a token from their first request. Off on the emulators (they never check) and until a site key exists.
 const siteKey = USING_EMULATORS ? undefined : import.meta.env.VITE_APPCHECK_SITE_KEY
 export const APP_CHECK_ON = Boolean(siteKey)
 if (siteKey) {
   // Dev server only: reCAPTCHA can't vouch for 127.0.0.1, so send a debug token registered in the
   // console (`true` prints a new one to register). Production builds drop this branch, token and all.
   if (import.meta.env.DEV) self.FIREBASE_APPCHECK_DEBUG_TOKEN = import.meta.env.VITE_APPCHECK_DEBUG_TOKEN || true
-  initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(siteKey), isTokenAutoRefreshEnabled: true })
+  initializeAppCheck(app, { provider: new ReCaptchaV3Provider(siteKey), isTokenAutoRefreshEnabled: true })
 }
 
 export const auth = getAuth(app)

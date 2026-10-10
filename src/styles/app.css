@@ -742,62 +742,248 @@ p {
   }
 }
 
-/* ---------- landing (board 01) ---------- */
+/* ---------- landing scroll story ---------- */
 
 .landing {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);
-  align-items: center;
-  gap: clamp(16px, 3vw, 40px);
-  min-height: 100vh;
-  padding: 108px clamp(28px, 6vw, 88px) 48px;
 }
 
 .landing__auth {
-  position: absolute;
-  top: 28px;
-  right: clamp(20px, 4vw, 48px);
+  position: fixed;
+  z-index: 40;
+  top: 22px;
+  right: clamp(16px, 3vw, 40px);
   display: flex;
-  gap: 16px;
+  gap: 14px;
 }
 
-.wire-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 128px;
-  min-height: 48px;
-  padding: 10px 22px;
-  border: 2px solid var(--ink);
-  border-radius: 14px;
-  background: var(--paper);
-  color: var(--ink);
-  font-family: var(--font-code);
-  font-size: 20px;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-decoration: none;
-}
-
-.wire-btn:hover {
-  background: var(--paper-warm);
-}
-
-/* After deleting an account: a first row across the whole sheet */
+/* After deleting an account: a quiet line at the top of the sheet, clear of the fixed buttons */
 .landing__left {
-  grid-column: 1 / -1;
+  position: absolute;
+  z-index: 2;
+  top: 30px;
+  left: clamp(20px, 4vw, 56px);
+  right: clamp(220px, 24vw, 320px);
   margin: 0;
 }
 
-.landing__title {
+@media (max-width: 760px) {
+  .landing__left {
+    top: 78px;
+    right: 20px;
+  }
+}
+
+.story {
+  position: relative;
+  min-height: 100vh;
+  display: grid;
+  align-items: center;
+  align-content: center;
+  padding: 88px clamp(20px, 4vw, 56px) 40px;
+}
+
+.story--open {
+  grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.28fr);
+  gap: clamp(12px, 2vw, 28px);
+}
+
+.story__intro {
+  position: relative;
+  min-height: 72vh;
+  display: grid;
+  align-items: end;
+}
+
+.story__wash {
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 58%;
+  pointer-events: none;
+}
+
+.story__title {
+  position: relative;
+  z-index: 1;
+  justify-self: start;
   margin: 0;
-  font-family: var(--font-code);
-  font-weight: 600;
-  font-size: clamp(52px, 6.6vw, 88px);
-  line-height: 0.95;
-  letter-spacing: -0.035em;
+  max-width: 8em;
+  font-size: clamp(48px, 5.4vw, 76px);
+  line-height: 0.98;
+  font-weight: 300;
+}
+
+.story--why {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: clamp(24px, 4vw, 64px);
+}
+
+.story__photo {
+  position: relative;
+  margin: 0;
+  min-height: min(62vh, 520px);
+  overflow: hidden;
+}
+
+.story__photo img,
+.story__photo-wash {
+  width: 100%;
+  height: min(62vh, 520px);
+  object-fit: cover;
+  display: block;
+}
+
+.story__photo figcaption {
+  position: absolute;
+  left: 16px;
+  bottom: 14px;
+}
+
+.story__quote,
+.story__offer {
+  margin: 0;
+  font-size: clamp(32px, 3.6vw, 52px);
+  line-height: 1.45;
+  max-width: 14em;
+}
+
+.stroke {
+  position: relative;
+  display: inline;
+}
+
+.stroke--long {
+  white-space: nowrap;
+}
+
+.brush {
+  position: absolute;
+  left: -8%;
+  bottom: -0.02em;
+  width: 116%;
+  height: 0.22em;
+  object-fit: fill;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.brush--wide {
+  height: 0.36em;
+  bottom: 0.02em;
+}
+
+.stroke--figure .brush {
+  height: 0.22em;
+  bottom: 0.06em;
+}
+
+.story--studies {
+  align-content: center;
+  overflow: hidden;
+  gap: 18px;
+}
+
+.story__stats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: clamp(14px, 2vh, 22px);
+  width: 100%;
+}
+
+.story__stats li {
+  display: grid;
+  gap: 6px;
+  max-width: none;
+  will-change: transform;
+}
+
+.story__figure {
+  margin: 0;
+  font-size: clamp(44px, 5.6vw, 76px);
+  line-height: 1.05;
+}
+
+.story__line {
+  margin: 0;
+  font-size: clamp(20px, 2.1vw, 28px);
+  line-height: 1.3;
+  max-width: 46em;
+}
+
+.story__stats a {
   color: var(--ink);
+  font-size: 16px;
+}
+
+.story--what {
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: clamp(16px, 3vw, 40px);
+  align-items: center;
+}
+
+.story__copy {
+  display: grid;
+  gap: clamp(20px, 3vh, 36px);
+  align-content: center;
+}
+
+.story__how {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px 22px;
+}
+
+.story__how ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.story__how li {
+  font-size: clamp(18px, 1.7vw, 24px);
+  line-height: 1.25;
+}
+
+.story__dots {
+  width: 100%;
+  height: auto;
+  justify-self: stretch;
+  color: var(--ink);
+}
+
+.story__field {
+  width: 100%;
+  height: auto;
+  color: var(--ink);
+  justify-self: stretch;
+}
+
+.story__field line {
+  stroke: currentColor;
+  stroke-width: 1;
+  fill: none;
+}
+
+.story__field circle {
+  fill: currentColor;
+}
+
+.story__dots line {
+  stroke: currentColor;
+  stroke-width: 1.25;
+  fill: none;
+}
+
+.story__dots circle {
+  fill: currentColor;
 }
 
 .star-chart {
@@ -1365,26 +1551,66 @@ p {
 }
 
 @media (max-width: 760px) {
-  .landing {
-    grid-template-columns: 1fr;
-    align-items: start;
-    padding: 96px 20px 32px;
-  }
-
   .landing__auth {
-    top: 16px;
-    right: 16px;
-    gap: 10px;
+    top: 12px;
+    right: 12px;
+    gap: 8px;
   }
 
-  .wire-btn {
-    min-width: 104px;
+  .landing__auth .act {
     font-size: 16px;
+    padding: 4px 10px 5px;
+  }
+
+  .story,
+  .story--open,
+  .story--why,
+  .story--what {
+    grid-template-columns: 1fr;
+    padding: 84px 16px 28px;
+  }
+
+  .story__how {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .story__figure {
+    font-size: 44px;
+  }
+
+  .story__quote,
+  .story__offer {
+    font-size: 28px;
+  }
+
+  .story__intro {
+    min-height: 0;
+  }
+
+  .story__wash {
+    position: relative;
+    top: 0;
+    width: 100%;
+    height: 26vh;
+  }
+
+  .story__title {
+    justify-self: start;
+    margin: 8px 0 0;
+    max-width: none;
   }
 
   .star-chart {
     justify-self: center;
     width: min(100%, 420px);
+  }
+
+  .story__photo,
+  .story__photo img,
+  .story__photo-wash {
+    min-height: 0;
+    height: 46vh;
   }
 
   .bubble__box {

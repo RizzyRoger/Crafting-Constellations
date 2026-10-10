@@ -2,6 +2,7 @@ import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import { Link, useParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { Composer } from '../components/Composer'
+import { ConfirmEmail } from '../components/ConfirmEmail'
 import { Item } from '../components/Item'
 import { LikeButton } from '../components/LikeButton'
 import { Quiet } from '../components/Quiet'
@@ -11,7 +12,7 @@ import type { Comment, Group, Post } from '../lib/types'
 
 export const PostPage = () => {
   const { groupId = '', postId = '' } = useParams()
-  const { uid } = useMe()
+  const { uid, claims } = useMe()
   const path = `groups/${groupId}/posts/${postId}`
   const group = useDocData<Group>(`groups/${groupId}`)
   const membership = useDocData<{ uid: string }>(`groups/${groupId}/members/${uid}`)
@@ -51,7 +52,7 @@ export const PostPage = () => {
         blotSize={32}
         variant="card"
         actions={
-          post.data.status === 'published' && (
+          post.data.status === 'published' && claims.emailVerified && (
             <>
               <LikeButton postPath={path} me={uid} count={post.data.likeCount} />
               <span className="mark" aria-hidden="true">
@@ -81,7 +82,12 @@ export const PostPage = () => {
             </li>
           ))}
         </ul>
-        {post.data.status === 'published' && <Composer shape="bar" label="Comment" submitLabel="Send" rows={1} onSubmit={reply} />}
+        {post.data.status === 'published' &&
+          (claims.emailVerified ? (
+            <Composer shape="bar" label="Comment" submitLabel="Send" rows={1} onSubmit={reply} />
+          ) : (
+            <ConfirmEmail />
+          ))}
       </section>
     </div>
   )
