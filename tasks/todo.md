@@ -13,7 +13,10 @@ Plan: `/Users/darren/.claude/plans/i-want-you-to-quiet-stardust.md`
   - [x] tests: unit 115, rules 48, local-backend e2e 10, deleteAccount e2e 5
   - [x] browser (own emulators on other ports, two people): @ list by keyboard and pointer, highlight from the server, comment / mention / accepted notices, opening one marks it read, Mark all read, withdrawn → "No longer here", 375px no sideways scroll
   - Found while checking: reading a withdrawn item's document (or a query pinned to its id) is refused, and the refused listen broke the Firestore client. Excerpts now ask for "published at this time" (`contentAt`).
-- [ ] 3. Draggable Friends chart (spring physics, your dot fixed)
+- [x] 3. Draggable Friends chart (spring physics, your dot fixed)
+  - `egoPhysics.ts`: line springs at their drawn length, a push between dots (capped up close), you pinned; settled before the first paint; a dropped dot keeps its new angle, not its old place (no pull home, like Obsidian)
+  - browser at 393px: a real mouse drag lands under the pointer, neighbours follow, release drifts to rest (~6s at most), the drag doesn't open the sheet, a click still does, your dot can't move; labels kept inside the edges
+  - Found while checking: a quick drag can end before the next frame, so the held dot is placed on each move, not only per frame
 - [ ] 4. Verify: typecheck, unit, rules, e2e, build, browser (two people, 375px + desktop)
 
 ## Reach out, Accept, and private group chats (2026-10-10)

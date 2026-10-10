@@ -1349,12 +1349,32 @@ p {
   stroke-dasharray: 4 5;
 }
 
+.ego svg {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .ego__node {
   cursor: pointer;
 }
 
-.ego__node circle {
+/* Everyone but you can be dragged; touch drags the dot, not the page */
+.ego__node.is-draggable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.ego__node.is-dragging {
+  cursor: grabbing;
+}
+
+.ego__node .ego__dot {
   fill: var(--ink);
+}
+
+/* A wider, invisible hold for fingers */
+.ego__node .ego__hit {
+  fill: transparent;
 }
 
 .ego__node text {
@@ -1363,7 +1383,7 @@ p {
   fill: var(--ink);
 }
 
-.ego__node.is-selected circle {
+.ego__node.is-selected .ego__dot {
   stroke: var(--paper);
   stroke-width: 2;
 }
