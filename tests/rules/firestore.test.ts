@@ -6,6 +6,7 @@ import {
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing'
 import {
+  arrayRemove,
   collection,
   collectionGroup,
   deleteDoc,
@@ -257,6 +258,54 @@ describe('private messages', () => {
     await assertFails(getDoc(doc(carl(), `dms/${PAIR}/messages/m1`)))
     await assertFails(getDoc(doc(admin(), `dms/${PAIR}/messages/m1`)))
     await assertSucceeds(getDocs(query(collection(bob(), `dms/${PAIR}/messages`), where('status', '==', 'published'))))
+  })
+})
+
+describe('private group chats', () => {
+  const CHAT = 'chats/c1'
+
+  beforeEach(() =>
+    seed(async (db) => {
+      await setDoc(doc(db, CHAT), { name: 'Tuesday soup', uids: ['alice', 'bob', 'una', 'bea'], createdBy: 'alice' })
+      await setDoc(doc(db, `${CHAT}/messages/m1`), { authorUid: 'bob', text: 'hi', status: 'published', createdAt: new Date() })
+    }),
+  )
+
+  it('only verified members can open or list a chat', async () => {
+    await assertSucceeds(getDoc(doc(bob(), CHAT)))
+    await assertSucceeds(getDocs(query(collection(bob(), 'chats'), where('uids', 'array-contains', 'bob'))))
+    await assertFails(getDoc(doc(carl(), CHAT)))
+    await assertFails(getDoc(doc(una(), CHAT)))
+    await assertSucceeds(getDoc(doc(bob(), `${CHAT}/messages/m1`)))
+    await assertFails(getDoc(doc(carl(), `${CHAT}/messages/m1`)))
+    await assertSucceeds(getDocs(query(collection(alice(), `${CHAT}/messages`), where('status', '==', 'published'))))
+  })
+
+  it('chats are created by the function, never by clients', async () => {
+    await assertFails(setDoc(doc(alice(), 'chats/c2'), { name: 'Mine', uids: ['alice', 'bob'], createdBy: 'alice' }))
+    await assertFails(deleteDoc(doc(alice(), CHAT)))
+  })
+
+  it('members write pending notes as themselves; others cannot', async () => {
+    await assertSucceeds(setDoc(doc(collection(alice(), `${CHAT}/messages`)), pending('alice', { text: 'hello' })))
+    await assertFails(setDoc(doc(collection(alice(), `${CHAT}/messages`)), { ...pending('alice', { text: 'x' }), status: 'published' }))
+    await assertFails(setDoc(doc(collection(alice(), `${CHAT}/messages`)), pending('bob', { text: 'x' })))
+    await assertFails(setDoc(doc(collection(carl(), `${CHAT}/messages`)), pending('carl', { text: 'x' })))
+    await assertFails(setDoc(doc(collection(una(), `${CHAT}/messages`)), pending('una', { text: 'x' })))
+    await assertFails(setDoc(doc(collection(banned(), `${CHAT}/messages`)), pending('bea', { text: 'x' })))
+  })
+
+  it('a member can leave, but cannot remove or add anyone else', async () => {
+    await assertFails(updateDoc(doc(alice(), CHAT), { uids: ['alice', 'una', 'bea'] }))
+    await assertFails(updateDoc(doc(alice(), CHAT), { uids: ['alice', 'bob', 'una', 'bea', 'carl'] }))
+    await assertFails(updateDoc(doc(alice(), CHAT), { name: 'Renamed' }))
+    await assertSucceeds(updateDoc(doc(bob(), CHAT), { uids: arrayRemove('bob') }))
+    await assertFails(getDoc(doc(bob(), `${CHAT}/messages/m1`)))
+  })
+
+  it('chat notes can be reported', async () => {
+    const report = { reporterUid: 'alice', contentPath: `${CHAT}/messages/m1`, reason: 'harassment', createdAt: serverTimestamp() }
+    await assertSucceeds(setDoc(doc(collection(alice(), 'reports')), report))
   })
 })
 

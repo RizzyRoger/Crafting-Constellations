@@ -48,6 +48,9 @@ export const approveContent = onCall<{ queueId: string }>(async (request) => {
         if (queued.kind === 'dm') {
           tx.set(db.doc(`dms/${queued.pairId}`), { uids: String(queued.pairId).split('_'), lastMessageAt: now, lastAuthorUid: queued.authorUid }, { merge: true })
         }
+        if (queued.kind === 'chatMessage') {
+          tx.update(db.doc(`chats/${queued.chatId}`), { lastMessageAt: now, lastAuthorUid: queued.authorUid })
+        }
       }
     }
     tx.update(queueRef, { state: 'resolved', resolution: 'approved', resolvedBy: actor, resolvedAt: now, updatedAt: now })
@@ -107,6 +110,8 @@ export const banUser = onCall<{ uid: string; reason: string; hideContent?: boole
   const writer = db.bulkWriter()
   const memberships = await db.collectionGroup('members').where('uid', '==', uid).get()
   memberships.docs.forEach((d) => writer.delete(d.ref))
+  const chats = await db.collection('chats').where('uids', 'array-contains', uid).get()
+  chats.docs.forEach((d) => writer.update(d.ref, { uids: FieldValue.arrayRemove(uid) }))
 
   if (request.data.hideContent) {
     for (const group of ['posts', 'comments', 'messages']) {

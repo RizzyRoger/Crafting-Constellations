@@ -6,7 +6,7 @@ import { useSignOut } from '../auth/useSignOut'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import { otherInPair } from '../lib/pair'
-import type { Connection, Group, Membership, Notice, Profile } from '../lib/types'
+import type { Chat, Connection, Group, Membership, Notice, Profile } from '../lib/types'
 import { Blot } from '../wash/Blot'
 
 interface ThreadRow {
@@ -49,12 +49,12 @@ const Rail = () => {
 
   const [searchOpen, setSearchOpen] = useState(false)
   const [chatsOpen, setChatsOpen] = useState(() => location.pathname.startsWith('/messages'))
-  const [groupsOpen, setGroupsOpen] = useState(() => location.pathname.startsWith('/groups'))
+  const [groupsOpen, setGroupsOpen] = useState(() => /^\/(groups|chats)/.test(location.pathname))
   const [queryText, setQueryText] = useState('')
 
   useEffect(() => {
     if (location.pathname.startsWith('/messages')) setChatsOpen(true)
-    if (location.pathname.startsWith('/groups')) setGroupsOpen(true)
+    if (/^\/(groups|chats)/.test(location.pathname)) setGroupsOpen(true)
   }, [location.pathname])
 
   const memberships = useQueryData<Membership & { id: string; path: string }>(uid && `rail-members|${uid}`, () =>
@@ -71,9 +71,13 @@ const Rail = () => {
   const threads = useQueryData<ThreadRow>(uid && verified ? `rail-threads|${uid}` : null, () =>
     query(collection(db, 'dms'), where('uids', 'array-contains', uid)),
   )
+  const chats = useQueryData<Chat>(uid && verified ? `rail-chats|${uid}` : null, () =>
+    query(collection(db, 'chats'), where('uids', 'array-contains', uid)),
+  )
 
   const myGroupIds = new Set(memberships.data.map((m) => m.path.split('/')[1]))
   const myGroups = groups.data.filter((g) => myGroupIds.has(g.id)).sort((a, b) => a.name.localeCompare(b.name))
+  const myChats = [...chats.data].sort((a, b) => a.name.localeCompare(b.name))
   const incoming = connections.data.filter((c) => c.status === 'pending' && c.recipient === uid).length
   const byId = useMemo(() => new Map(people.data.map((p) => [p.id, p])), [people.data])
 
@@ -138,7 +142,7 @@ const Rail = () => {
       </Disclosure>
 
       <Disclosure label="Group Chats" open={groupsOpen} onToggle={setGroupsOpen}>
-        {myGroups.length === 0 ? (
+        {myGroups.length === 0 && myChats.length === 0 ? (
           <p className="disc__empty">No groups yet.</p>
         ) : (
           <ul className="disc__list">
@@ -147,7 +151,19 @@ const Rail = () => {
                 <NavLink to={`/groups/${group.id}`}>{group.name}</NavLink>
               </li>
             ))}
+            {myChats.map((chat) => (
+              <li key={chat.id}>
+                <NavLink to={`/chats/${chat.id}`}>
+                  {chat.name} <span className="code">· private</span>
+                </NavLink>
+              </li>
+            ))}
           </ul>
+        )}
+        {verified && (
+          <Link to="/chats/new" className="disc__empty">
+            Start a private group chat
+          </Link>
         )}
       </Disclosure>
 

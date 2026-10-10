@@ -203,6 +203,31 @@ service cloud.firestore {
       }
     }
 
+    // ---------- private group chats ----------
+    // Made by the createChat function from the creator's accepted connections
+    match /chats/{chatId} {
+      // Lists can't bind {chatId}; query with uids array-contains me
+      allow read: if verified() && me() in resource.data.uids;
+      // Leave: take only yourself off the list
+      allow update: if canWrite() && me() in resource.data.uids
+        && changed().hasOnly(['uids'])
+        && nd().uids == resource.data.uids.removeAll([me()]);
+      allow create, delete: if false;
+
+      match /messages/{mid} {
+        function inChat() {
+          return me() in get(/databases/$(database)/documents/chats/$(chatId)).data.uids;
+        }
+        allow read: if verified() && inChat() && visible();
+        allow create: if canWrite() && verified() && inChat()
+          && newContent(['authorUid', 'text', 'status', 'createdAt'],
+                        ['authorUid', 'text', 'status', 'createdAt'])
+          && isStr(nd().text, 1, 1000);
+        allow update: if canWrite() && inChat() && isWithdrawal();
+        allow delete: if false;
+      }
+    }
+
     // ---------- reports ----------
     match /reports/{rid} {
       allow create: if canWrite()
@@ -210,7 +235,7 @@ service cloud.firestore {
         && nd().keys().hasAll(['reporterUid', 'contentPath', 'reason', 'createdAt'])
         && nd().reporterUid == me()
         && nd().contentPath is string
-        && nd().contentPath.matches('^(groups/[^/]+/posts/[^/]+(/comments/[^/]+)?|groups/[^/]+/messages/[^/]+|dms/[^/]+/messages/[^/]+|users/[^/]+)$')
+        && nd().contentPath.matches('^(groups/[^/]+/posts/[^/]+(/comments/[^/]+)?|groups/[^/]+/messages/[^/]+|dms/[^/]+/messages/[^/]+|chats/[^/]+/messages/[^/]+|users/[^/]+)$')
         && nd().reason in ['harassment', 'hate', 'selfHarm', 'spam', 'personalInfo', 'impersonation', 'other']
         && (!('details' in nd()) || isStr(nd().details, 0, 500))
         && nd().createdAt == request.time;

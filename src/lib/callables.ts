@@ -16,6 +16,7 @@ export const reviewProfessional = call<{ uid: string; decision: 'approve' | 'den
 export const setAdmin = call<{ uid: string; admin: boolean }>('setAdmin')
 export const bootstrapAdmin = call<Record<string, never>>('bootstrapAdmin')
 export const createGroup = call<{ name: string; constellationId: string; description?: string }, { ok: true; id: string }>('createGroup')
+export const createChat = call<{ name: string; uids: string[] }, { ok: true; id: string }>('createChat')
 
 // Callable errors carry { problem } in details for field-level hints
 export const problemOf = (error: unknown): string | undefined => {
