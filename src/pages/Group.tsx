@@ -30,7 +30,7 @@ const Talk = ({ groupId, me, verified }: { groupId: string; me: string; verified
   }
 
   return (
-    <div className="stack" style={{ gap: 20 }}>
+    <div className="stage">
       <div className="chat" aria-live="polite" aria-label="Group talk">
         {messages.data.length === 0 && !messages.loading && <p className="empty">Nobody has said anything yet. Say hello, or just read.</p>}
         {messages.data.map((m) => (
@@ -64,12 +64,6 @@ const Posts = ({ groupId, me, verified }: { groupId: string; me: string; verifie
         <Composer expandable label="Make a post" withTitle rows={4} max={4000} submitLabel="Send" onSubmit={publish} />
       ) : (
         <ConfirmEmail />
-      )}
-      {posts.error && (
-        // #region agent log
-        fetch('http://127.0.0.1:7404/ingest/adb60411-22ef-4c89-8427-3ded0fdd934d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'19dc83'},body:JSON.stringify({sessionId:'19dc83',hypothesisId:'A',location:'Group.tsx:posts',message:'posts query error surfaced',data:{groupId,error:posts.error.message,verified},timestamp:Date.now()})}).catch(()=>{}),
-        // #endregion
-        null
       )}
       {posts.data.length === 0 && !posts.loading ? (
         <p className="empty">No posts yet.</p>
@@ -155,7 +149,7 @@ export const Group = () => {
   }
 
   return (
-    <>
+    <div className="pane">
       <PageHead
         title={group.data.name}
         kicker={`${group.data.constellationName} · ${group.data.memberCount ?? 0} ${group.data.memberCount === 1 ? 'person' : 'people'}`}
@@ -199,6 +193,6 @@ export const Group = () => {
       ) : (
         <p className="empty">Join to read and write here. You can leave any time.</p>
       )}
-    </>
+    </div>
   )
 }
