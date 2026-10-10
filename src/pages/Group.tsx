@@ -1,5 +1,5 @@
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { Composer } from '../components/Composer'
@@ -8,42 +8,15 @@ import { Item } from '../components/Item'
 import { LikeButton } from '../components/LikeButton'
 import { PageHead } from '../components/PageHead'
 import { Quiet } from '../components/Quiet'
+import { Talk } from '../components/Talk'
 import { describeError } from '../lib/callables'
 import { db } from '../lib/firebase'
 import { useDocData, useLiveContent } from '../lib/live'
 import { joinGroup, leaveGroup } from '../lib/social'
-import type { Group as GroupDoc, Message, Post } from '../lib/types'
+import type { Group as GroupDoc, Post } from '../lib/types'
 import { HEAD_DESCENDING } from '../wash/strokes'
 
 type Tab = 'talk' | 'posts'
-
-const Talk = ({ groupId, me, verified }: { groupId: string; me: string; verified: boolean }) => {
-  const messages = useLiveContent<Message>(`groups/${groupId}/messages`, me, { direction: 'asc', max: 80 })
-  const end = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    end.current?.scrollIntoView({ block: 'nearest' })
-  }, [messages.data.length])
-
-  const send = async (text: string) => {
-    await addDoc(collection(db, `groups/${groupId}/messages`), { authorUid: me, text, status: 'pending', createdAt: serverTimestamp() })
-  }
-
-  return (
-    <div className="stage">
-      <div className="chat" aria-live="polite" aria-label="Group talk">
-        {messages.data.length === 0 && !messages.loading && <p className="empty">Nobody has said anything yet. Say hello, or just read.</p>}
-        {messages.data.map((m) => (
-          <Item key={m.id} item={m} me={me} blotSize={36} variant="bubble">
-            <p className="voice">{m.text}</p>
-          </Item>
-        ))}
-        <div ref={end} />
-      </div>
-      {verified ? <Composer shape="bar" label="Message" submitLabel="Send" rows={1} onSubmit={send} /> : <ConfirmEmail />}
-    </div>
-  )
-}
 
 const Posts = ({ groupId, me, verified }: { groupId: string; me: string; verified: boolean }) => {
   const posts = useLiveContent<Post>(`groups/${groupId}/posts`, me, { max: 40 })
@@ -185,7 +158,7 @@ export const Group = () => {
             </button>
           </div>
           {tab === 'talk' ? (
-            <Talk groupId={groupId} me={uid} verified={claims.emailVerified} />
+            <Talk path={`groups/${groupId}/messages`} me={uid} verified={claims.emailVerified} />
           ) : (
             <Posts groupId={groupId} me={uid} verified={claims.emailVerified} />
           )}
