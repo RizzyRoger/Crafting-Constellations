@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Value Study 02</title>
+  <meta name="description" content="Crafting Constellations — design board 02: the source swatch sheet as the interface.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Source+Sans+3:wght@400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../shared/tokens.css">
+  <link rel="stylesheet" href="../shared/paper.css">
+  <style>
+    :root {
+      --font-pencil: 'Nanum Pen Script', 'Bradley Hand', cursive;
+      --pencil-weight: 400;
+      --note-size: 23px;
+      --name-size: 34px;
+    }
+
+    body {
+      padding: clamp(14px, 3vh, 32px) var(--gutter);
+    }
+
+    /* The nested sheet: bright source paper, deckled edge drawn in pencil */
+    .sheet {
+      position: relative;
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: clamp(18px, 3.2vh, 34px) clamp(18px, 3vw, 44px) clamp(20px, 3.6vh, 40px) clamp(10px, 1.4vw, 20px);
+      isolation: isolate;
+    }
+
+    .sheet::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      background: var(--paper-sheet);
+      outline: 1px solid var(--rule);
+      filter: url(#deckle);
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+      align-items: center;
+      column-gap: 16px;
+      position: relative;
+    }
+
+    .row + .row {
+      border-top: 1px solid var(--rule);
+    }
+
+    /* Commanding wash: the first bar of the sheet, at fold scale */
+    .lead {
+      min-height: clamp(260px, 48vh, 470px);
+      padding-bottom: clamp(10px, 2vh, 20px);
+      align-items: stretch;
+    }
+
+    .lead .wash {
+      margin-right: -6%;
+    }
+
+    .lead aside {
+      display: grid;
+      align-content: start;
+      gap: 18px;
+      padding-top: 6px;
+      justify-items: end;
+      text-align: right;
+    }
+
+    .plate {
+      justify-items: end;
+    }
+
+    .plate__line {
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .plate__line::before {
+      border-left: 0;
+      border-right: 1px solid var(--pencil);
+    }
+
+    .lead .note {
+      max-width: 15em;
+      margin: 0;
+    }
+
+    /* Pigment index: navigation as swatch rows, value = importance */
+    nav ol {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    nav a {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+      align-items: center;
+      column-gap: 16px;
+      padding: clamp(6px, 1.3vh, 12px) 0;
+      color: inherit;
+      text-decoration: none;
+      border-top: 1px solid var(--rule);
+    }
+
+    nav .swatch {
+      height: clamp(40px, 7.4vh, 64px);
+      width: 86%;
+    }
+
+    .label {
+      text-align: right;
+      line-height: 1;
+    }
+
+    .label .pencil {
+      display: block;
+      font-size: 30px;
+    }
+
+    .label .code {
+      display: inline-block;
+      margin-top: 4px;
+    }
+
+    nav a:hover .pencil,
+    nav a:focus-visible .pencil {
+      color: #1f1e22;
+    }
+
+    .foot {
+      max-width: 1180px;
+      margin: 14px auto 0;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .foot a {
+      color: var(--ink);
+    }
+
+    @media (max-width: 760px) {
+      body {
+        padding: 12px;
+      }
+
+      .row,
+      nav a {
+        grid-template-columns: 1fr;
+      }
+
+      .lead {
+        min-height: 0;
+      }
+
+      .lead .wash {
+        height: 42vh;
+        margin-right: 0;
+      }
+
+      .lead aside {
+        padding: 12px 0 6px;
+      }
+
+      nav .swatch {
+        width: 100%;
+      }
+
+      .label {
+        margin-top: -8px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <filter id="pencil"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="4" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="1.8" xChannelSelector="R" yChannelSelector="G"/></filter>
+    <filter id="deckle" x="-2%" y="-2%" width="104%" height="104%"><feTurbulence type="fractalNoise" baseFrequency="0.09" numOctaves="3" seed="11" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="7" xChannelSelector="R" yChannelSelector="G"/></filter>
+  </svg>
+
+  <main class="sheet">
+    <section class="row lead" aria-labelledby="name">
+      <div class="wash" id="hero" aria-hidden="true"></div>
+      <aside>
+        <header class="plate">
+          <h1 class="plate__name pencil ruled" id="name">Crafting Constellations</h1>
+          <p class="plate__line code" style="margin:0">PB29 / PBk6 — low staining — semitransparent — granulating</p>
+        </header>
+        <p class="note pencil">Write the need once.<br>The people who asked “what can I do?” can act on it.</p>
+      </aside>
+    </section>
+
+    <nav aria-label="Pigment index">
+      <ol>
+        <li>
+          <a href="#ask">
+            <span class="swatch" data-loose data-density="1" style="--d:var(--graphite-dense);--m:var(--graphite-mid);--t:var(--graphite-tail)"></span>
+            <span class="label"><span class="pencil">Ask</span><span class="code">PBk10 · write the need once</span></span>
+          </a>
+        </li>
+        <li>
+          <a href="#people">
+            <span class="swatch" data-loose data-density="0.78" data-gran="0.8" style="--d:var(--fresco-dense);--m:var(--fresco-mid);--t:var(--fresco-tail)"></span>
+            <span class="label"><span class="pencil">People</span><span class="code">PB29 PB15 · <span class="circled">who offered</span></span></span>
+          </a>
+        </li>
+        <li>
+          <a href="#days">
+            <span class="swatch" data-loose data-density="0.6" data-gran="0.2" style="--d:var(--caliente-dense);--m:var(--caliente-mid);--t:var(--caliente-tail)"></span>
+            <span class="label"><span class="pencil">Days</span><span class="code">PB7 PB29 · the week, by day</span></span>
+          </a>
+        </li>
+        <li>
+          <a href="#notes">
+            <span class="swatch" data-loose data-density="0.45" data-gran="0.8" style="--d:var(--neutral-dense);--m:var(--neutral-mid);--t:var(--neutral-tail)"></span>
+            <span class="label"><span class="pencil">Notes</span><span class="code">PB29 PBk9 · short updates, no feed</span></span>
+          </a>
+        </li>
+      </ol>
+    </nav>
+  </main>
+
+  <p class="foot code">
+    <span>Board 02 · Sheet — darker wash, more important</span>
+    <a href="../index.html">back to index</a>
+  </p>
+
+  <script type="module">
+    import { paintWash, paynesStops, paintSwatches } from '../shared/wash.js'
+
+    const start = () => {
+      paintWash(document.getElementById('hero'), {
+        seed: 61,
+        stops: paynesStops(),
+        granulation: 0.85,
+        streaks: 0.4,
+        duration: 1000,
+        strokes: [
+          { from: [0.015, 0.6], to: [1, 0.34], width: 0.74, density: 1, falloff: 1.7, rag: 0.16, dry: 0.7, pool: 0.75, comb: 0.12, strand: 9 },
+          { from: [0.03, 0.72], to: [0.72, 0.56], width: 0.4, density: 0.42, falloff: 1.6, rag: 0.22, dry: 0.5, pool: 0.3 },
+        ],
+      })
+      paintSwatches()
+    }
+
+    document.fonts.ready.then(start)
+  </script>
+</body>
+</html>

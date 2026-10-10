@@ -1,0 +1,294 @@
+/*
+ * The Value Study — paper, voices, and drawn components
+ * Requires tokens.css. No shadows, no card radius, no white.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--paper);
+  font-family: var(--font-code);
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+/* Cold-press tooth: fine grain + slow mottle, multiplied over everything,
+   including the wash, so pigment and paper read as one surface. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  opacity: 0.55;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='t'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.42 0 0 0 0 0.40 0 0 0 0 0.37 0 0 0 -1.15 0.62'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23t)'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='600'%3E%3Cfilter id='m'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.012' numOctaves='2' seed='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.52 0 0 0 0 0.48 0 0 0 -0.9 0.5'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23m)'/%3E%3C/svg%3E");
+  background-size: 240px 240px, 600px 600px;
+}
+
+/* Voices ---------------------------------------------------------------- */
+
+.code {
+  font-family: var(--font-code);
+  font-size: var(--code-size);
+  font-weight: 400;
+  letter-spacing: var(--code-track);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.pencil {
+  font-family: var(--font-pencil);
+  font-weight: var(--pencil-weight);
+  font-style: var(--pencil-style, normal);
+  color: var(--ink-deep);
+  letter-spacing: 0.01em;
+}
+
+.note {
+  font-size: var(--note-size);
+  line-height: 1.3;
+}
+
+/* Drawn box: hairline drawn after the words, small even padding.
+   The line itself is roughened by the #pencil SVG filter when present. */
+.ruled {
+  position: relative;
+  display: inline-block;
+  padding: 3px 12px 4px;
+}
+
+.ruled::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--pencil);
+  filter: url(#pencil);
+  pointer-events: none;
+}
+
+/* Caption plate: name in a ruled box, pigment line on a longer ruled field */
+.plate {
+  display: grid;
+  justify-items: start;
+}
+
+.plate__name {
+  font-size: var(--name-size);
+  line-height: 1.15;
+  margin: 0;
+}
+
+.plate__line {
+  position: relative;
+  justify-self: stretch;
+  padding: 10px 12px 9px;
+  font-size: 15px;
+}
+
+.plate__line::before {
+  content: '';
+  position: absolute;
+  inset: -1px 0 0 0;
+  border-left: 1px solid var(--pencil);
+  border-bottom: 1px solid var(--pencil);
+  filter: url(#pencil);
+  pointer-events: none;
+}
+
+/* Swatch bar: CSS gradient fallback; wash.js paints a canvas over it.
+   Wet-brush caps on the short ends only. */
+.swatch {
+  position: relative;
+  display: block;
+  height: 56px;
+  border-radius: 999px / 40%;
+  background: linear-gradient(90deg, var(--d) 0%, var(--m) 55%, var(--t) 92%, transparent 100%);
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 82%, transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0%, #000 82%, transparent 100%);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  transition: -webkit-mask-size 500ms ease-out, mask-size 500ms ease-out;
+}
+
+.swatch.is-painted {
+  background: none;
+  border-radius: 0;
+}
+
+.swatch canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Hover: the fade extends a few pixels. No lift, no scale, no glow. */
+a:hover .swatch,
+a:focus-visible .swatch,
+.swatch-row:hover .swatch {
+  -webkit-mask-size: 112% 100%;
+  mask-size: 112% 100%;
+}
+
+.swatch-row .note {
+  transition: color 300ms ease-out;
+}
+
+/* Wash canvas (hero) */
+.wash {
+  position: relative;
+}
+
+.wash canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Fields: baseline rule on paper ------------------------------------- */
+.field {
+  display: grid;
+  gap: 2px;
+}
+
+.field label {
+  font-family: var(--font-code);
+  font-size: var(--code-size);
+  letter-spacing: var(--code-track);
+  color: var(--ink);
+}
+
+.field input,
+.field textarea {
+  font: inherit;
+  font-family: var(--font-pencil);
+  font-weight: var(--pencil-weight);
+  font-size: 18px;
+  color: var(--ink-deep);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--pencil);
+  border-radius: 0;
+  padding: 4px 0 3px;
+  outline: none;
+}
+
+.field input::placeholder {
+  color: var(--meta-readable);
+}
+
+.field input:focus {
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 2px;
+}
+
+.field input:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
+}
+
+/* Actions ------------------------------------------------------------ */
+.act {
+  position: relative;
+  display: inline-block;
+  font-family: var(--font-pencil);
+  font-weight: var(--pencil-weight);
+  font-size: 18px;
+  color: var(--ink-deep);
+  background: transparent;
+  border: 0;
+  padding: 4px 14px 5px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.act::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--ink);
+  filter: url(#pencil);
+  pointer-events: none;
+}
+
+.act--wash {
+  color: var(--paper);
+  padding: 5px 40px 6px 18px;
+  border-radius: 999px 0 0 999px / 60% 0 0 60%;
+  background:
+    linear-gradient(90deg, var(--wash-core) 0%, var(--wash-entry) 62%, var(--wash-shoulder) 80%, rgba(95, 102, 111, 0) 100%);
+}
+
+.act--wash::before {
+  border-color: transparent;
+}
+
+.act:hover::before {
+  border-width: 1.5px;
+}
+
+/* Focus: always visible, graphite */
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+/* Pencil circle around a word, as on the source sheet */
+.circled {
+  position: relative;
+  padding: 0 8px;
+}
+
+.circled::before {
+  content: '';
+  position: absolute;
+  inset: -3px -2px -2px;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  filter: url(#pencil);
+  pointer-events: none;
+}
+
+/* Small helpers */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.synthetic {
+  font-family: var(--font-code);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--meta-readable);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

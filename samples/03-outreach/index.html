@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Value Study 03</title>
+  <meta name="description" content="Crafting Constellations — design board 03: outreach grammar (need, who can act, when) inside the value study.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:ital,wght@1,300;1,400&family=Source+Sans+3:wght@400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../shared/tokens.css">
+  <link rel="stylesheet" href="../shared/paper.css">
+  <style>
+    :root {
+      --font-pencil: 'Alegreya Sans', 'Source Sans 3', sans-serif;
+      --pencil-style: italic;
+      --pencil-weight: 400;
+      --note-size: 18px;
+      --name-size: 27px;
+    }
+
+    .sheet {
+      display: grid;
+      grid-template-columns: minmax(0, 50fr) minmax(0, 50fr);
+      gap: clamp(24px, 4vw, 64px);
+      min-height: 100vh;
+      padding: clamp(18px, 3.5vh, 36px) var(--gutter) clamp(18px, 3.5vh, 36px) clamp(12px, 1.6vw, 24px);
+    }
+
+    .sheet .wash {
+      min-height: min(86vh, 780px);
+    }
+
+    .side {
+      display: grid;
+      align-content: start;
+      gap: clamp(20px, 3.8vh, 36px);
+      max-width: 520px;
+    }
+
+    .plate .plate__name {
+      font-weight: 300;
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-weight: 400;
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+    }
+
+    /* The ask: ruled fields on paper */
+    .ask {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px 24px;
+    }
+
+    .ask .field:first-of-type {
+      grid-column: 1 / -1;
+    }
+
+    .ask .actions {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      margin-top: 6px;
+    }
+
+    /* This week: labeled swatches, value = how soon */
+    .needs {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .need {
+      display: grid;
+      grid-template-columns: 84px 1fr auto;
+      align-items: center;
+      gap: 6px 16px;
+      padding: 9px 0 8px;
+      border-top: 1px solid var(--rule);
+    }
+
+    .need:last-child {
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .need .swatch {
+      height: 18px;
+    }
+
+    .need .pencil {
+      font-size: var(--note-size);
+      line-height: 1.2;
+    }
+
+    .need .meta {
+      grid-column: 2;
+      margin-top: -4px;
+    }
+
+    .need .state {
+      grid-column: 3;
+      grid-row: 1 / span 2;
+      font-size: 12px;
+      letter-spacing: var(--code-track);
+      color: var(--ink);
+      white-space: nowrap;
+    }
+
+    .need .state--open {
+      color: var(--ink-deep);
+      margin-right: 4px;
+    }
+
+    .need:hover .pencil {
+      color: #1f1e22;
+    }
+
+    .corner {
+      position: fixed;
+      right: var(--gutter);
+      bottom: 12px;
+    }
+
+    .corner a {
+      color: var(--ink);
+    }
+
+    @media (max-width: 760px) {
+      .sheet {
+        grid-template-columns: 1fr;
+        padding: 16px;
+      }
+
+      .sheet .wash {
+        min-height: 46vh;
+        margin: 0 22% 0 -8px;
+      }
+
+      .ask {
+        grid-template-columns: 1fr;
+      }
+
+      .need {
+        grid-template-columns: 56px 1fr;
+      }
+
+      .need .state {
+        grid-column: 2;
+        grid-row: auto;
+      }
+
+      .corner {
+        position: static;
+        padding: 0 16px 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <filter id="pencil"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="4" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="1.8" xChannelSelector="R" yChannelSelector="G"/></filter>
+  </svg>
+
+  <main class="sheet">
+    <div class="wash" id="hero" aria-hidden="true"></div>
+
+    <div class="side">
+      <header class="plate">
+        <h1 class="plate__name pencil ruled">Crafting Constellations</h1>
+        <p class="plate__line code" style="margin:0">PB29 / PBk6 — low staining — semitransparent — granulating</p>
+      </header>
+
+      <section aria-labelledby="ask-title">
+        <h2 class="code" id="ask-title">Ask once</h2>
+        <form class="ask" onsubmit="return false">
+          <div class="field">
+            <label for="need">Need</label>
+            <input id="need" name="need" value="Tuesday dinner — leave food on the porch.">
+          </div>
+          <div class="field">
+            <label for="who">Who can act</label>
+            <input id="who" name="who" placeholder="anyone nearby">
+          </div>
+          <div class="field">
+            <label for="when">When</label>
+            <input id="when" name="when" placeholder="Tue, after six">
+          </div>
+          <div class="actions">
+            <button class="act act--wash" type="submit">Send to our people</button>
+            <button class="act" type="button">Keep as a draft</button>
+          </div>
+        </form>
+      </section>
+
+      <section aria-labelledby="week-title">
+        <h2 class="code" id="week-title">This week <span class="synthetic">synthetic example</span></h2>
+        <ul class="needs">
+          <li class="need">
+            <span class="swatch" data-density="1" style="--d:var(--graphite-dense);--m:var(--graphite-mid);--t:var(--graphite-tail)"></span>
+            <span class="pencil">Tuesday dinner — leave food on the porch.</span>
+            <span class="code meta">anyone nearby · Tue after six</span>
+            <span class="state state--open circled">open</span>
+          </li>
+          <li class="need">
+            <span class="swatch" data-density="0.8" style="--d:var(--fresco-dense);--m:var(--fresco-mid);--t:var(--fresco-tail)"></span>
+            <span class="pencil">School pickup, Thursday.</span>
+            <span class="code meta">a parent from class · Thu 3:15</span>
+            <span class="state">covered</span>
+          </li>
+          <li class="need">
+            <span class="swatch" data-density="0.6" style="--d:var(--caliente-dense);--m:var(--caliente-mid);--t:var(--caliente-tail)"></span>
+            <span class="pencil">Someone to sit in the waiting room.</span>
+            <span class="code meta">one person · Fri morning</span>
+            <span class="state state--open circled">open</span>
+          </li>
+          <li class="need">
+            <span class="swatch" data-density="0.42" style="--d:var(--neutral-dense);--m:var(--neutral-mid);--t:var(--neutral-tail)"></span>
+            <span class="pencil">Lawn, whenever.</span>
+            <span class="code meta">anyone · any day</span>
+            <span class="state">covered</span>
+          </li>
+        </ul>
+      </section>
+    </div>
+  </main>
+
+  <p class="corner code"><a href="../index.html">Board 03 · Outreach — back to index</a></p>
+
+  <script type="module">
+    import { paintWash, paynesStops, paintSwatches } from '../shared/wash.js'
+
+    const start = () => {
+      paintWash(document.getElementById('hero'), {
+        seed: 7,
+        stops: paynesStops(),
+        granulation: 0.8,
+        streaks: 0.38,
+        duration: 1100,
+        strokes: [
+          { from: [0.14, 0.2], to: [0.98, 0.8], width: 0.5, density: 1, falloff: 1.9, rag: 0.18, dry: 0.65, pool: 0.5 },
+          { from: [0.1, 0.44], to: [0.8, 0.94], width: 0.3, density: 0.55, falloff: 2, rag: 0.24, dry: 0.7, pool: 0.2 },
+          { from: [0.22, 0.06], to: [0.95, 0.5], width: 0.18, density: 0.3, falloff: 1.3, rag: 0.26, dry: 0.75, pool: 0 },
+        ],
+      })
+      paintSwatches()
+    }
+
+    document.fonts.ready.then(start)
+  </script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+/*
+ * The Value Study — tokens
+ * Sampled 2026-10-10 from .impeccable/references/value-study.webp (comp)
+ * and .impeccable/references/swatch-sheet.webp (source sheet).
+ * Where a still disagreed with the handoff hex, the still wins (noted inline).
+ */
+
+:root {
+  /* Paper ------------------------------------------------------------- */
+  --paper: #f6f3ec;          /* comp, upper paper (#f7f4ee top, #f2efe8 right) */
+  --paper-warm: #f0ece6;     /* comp, gap under the hero wash (exact) */
+  --paper-swatch: #e0dfdb;   /* source sheet ground, for nested sheets */
+  --paper-sheet: #fbf8f1;    /* source sheet, bright interior paper (#fbf7eb–#fefaf3) */
+
+  /* Hero wash: Payne's along the stroke (comp) ------------------------- */
+  --wash-core: #21252d;      /* comp, densest entry pool — darker than handoff's entry */
+  --wash-entry: #323b48;     /* comp, entry body (handoff #585e65 sits one step lighter) */
+  --wash-shoulder: #5f666f;
+  --wash-mid: #78808b;       /* comp mid (matches handoff #787f8a) */
+  --wash-thin: #91959c;
+  --wash-fade: #b9b9bb;      /* comp, where pigment dies (handoff #b6b6b6) */
+  --wash-ghost: #d2cfcb;
+  --wash-deep: #343338;      /* fresco mass, ink / focus */
+
+  /* Pigment rail: dense / mid / tail ---------------------------------- */
+  --grey-titanium-dense: #675f56;  --grey-titanium-mid: #c7bba7;  --grey-titanium-tail: #e6dccd;
+  --graphite-dense: #272825;       --graphite-mid: #95928d;       --graphite-tail: #c2beb8;
+  --paynes-blue-dense: #212d40;    --paynes-blue-mid: #88909a;    --paynes-blue-tail: #bcbec2;
+  --paynes-dense: #4e4c4e;         --paynes-mid: #9e9a96;         --paynes-tail: #cbc6c0;
+  --fresco-dense: #3c3f42;         --fresco-mid: #909091;         --fresco-tail: #c8c6c2;
+  --caliente-dense: #56524b;       --caliente-mid: #b4aea7;       --caliente-tail: #d6cfc8;
+  --neutral-dense: #5b5754;        --neutral-mid: #b3a99f;        --neutral-tail: #cfc7be;
+  --cool-dense: #626163;           --cool-mid: #8b8889;           --cool-tail: #c4bab2;
+  --warm-dense: #514d4a;           --warm-mid: #a39d99;           --warm-tail: #cac4bb;
+
+  /* Committed UI roles ------------------------------------------------- */
+  --ink: #42413f;            /* graphite: code, body */
+  --ink-deep: #343338;       /* fresco: pencil notes, names */
+  --meta: #9e9a96;           /* decorative meta only — never readable body */
+  --meta-readable: #6e6a66;  /* quiet text that must be read (4.9:1 on paper) */
+  --pencil: #8f8c86;         /* drawn boxes (comp caption box, darkest px #908e88) */
+  --rule: #d7d5cf;           /* quiet hairline divider */
+  --warm: #817668;           /* caliente mid — the only tension */
+  --cool: #848a8b;           /* payne's blue mid — cool depth */
+
+  /* Type --------------------------------------------------------------- */
+  --font-code: 'Source Sans 3', 'Source Sans Pro', 'Helvetica Neue', Arial, sans-serif;
+  --font-pencil: 'Kalam', 'Bradley Hand', 'Segoe Print', cursive;
+  --pencil-weight: 300;
+  --code-size: 12px;
+  --code-track: 0.08em;
+  --note-size: 16px;
+  --name-size: 28px;
+
+  /* Space -------------------------------------------------------------- */
+  --gutter: clamp(16px, 4vw, 56px);
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 20px;
+  --s5: 32px;
+  --s6: 52px;
+  --s7: 84px;
+}
