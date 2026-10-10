@@ -28,6 +28,8 @@ Plan: `/Users/darren/.claude/plans/i-want-you-to-quiet-stardust.md`
   - automod read a word-initial `@` as "a", so "love you @Loser" slipped past where "love you Loser" is held. A fourth view drops that `@` (`unmarked`); "@ss"-style leet is still read by the old view. Probed: no real pen name is newly held by it;
   - merged main with `fill-app-panes` (PR #5, full-height panes): no conflicts; the @ list opens inside the pane, on top of the chat, unclipped (checked in the browser).
 - Verified after: unit 133, rules 48, local-backend e2e 11, deleteAccount e2e 5, typecheck, both builds.
+- [x] NUC bundle `crafting-constellations-backend.tgz` (gitignored, same layout as before: `functions/` source + `.env.local` + the moderator list, built on the NUC). New since the last bundle: notifications, mentions, and private chats (#4). Checked from a clean unpack: `npm ci` + build, then run as its own process on the emulators: a mentioned comment published with `mentioned`, a mention notice and a comment notice.
+- [ ] User: deploy rules + indexes, then hosting, then the NUC bundle (PR #6 says why).
 
 ## Reach out, Accept, and private group chats (2026-10-10)
 
