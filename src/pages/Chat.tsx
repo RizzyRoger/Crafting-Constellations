@@ -55,7 +55,7 @@ export const Chat = () => {
   }
 
   return (
-    <>
+    <div className="pane">
       <PageHead
         title={chat.data.name}
         kicker={`Private chat · ${chat.data.uids.length} ${chat.data.uids.length === 1 ? 'person' : 'people'}`}
@@ -86,6 +86,6 @@ export const Chat = () => {
         privateThread
         people={among(people.data, chat.data.uids, uid)}
       />
-    </>
+    </div>
   )
 }

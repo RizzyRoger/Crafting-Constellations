@@ -20,7 +20,7 @@ const STUDIES = [
   {
     figure: '26.2% to 28.4%',
     line: 'of family members live with clinical depression or anxiety. Being the primary caregiver raises the chance of short-term depression by 17 points.',
-    credit: 'Journal of Economic Behavior & Organization, 2023.',
+    credit: 'Read the study.',
     href: 'https://www.sciencedirect.com/science/article/pii/S016726812300207X',
   },
 ]
