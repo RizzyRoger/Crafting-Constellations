@@ -3,10 +3,11 @@ import './options.js'
 
 export { saveProfile } from './profile.js'
 export { deleteAccount } from './account.js'
-export { moderatePost, moderateComment, moderateGroupMessage, moderateDm } from './content.js'
+export { moderatePost, moderateComment, moderateGroupMessage, moderateDm, moderateChatMessage } from './content.js'
 export { countMembers, countLikes, countComments } from './counters.js'
 export { onReportCreated } from './reports.js'
 export { mirrorFriendship } from './friendships.js'
+export { createChat } from './chats.js'
 export {
   approveContent,
   removeContent,

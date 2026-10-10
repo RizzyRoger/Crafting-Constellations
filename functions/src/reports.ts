@@ -9,6 +9,7 @@ const couldSee = async (path: string, uid: string) => {
   if (s[0] === 'users') return true
   if (s[0] === 'groups') return (await db.doc(`groups/${s[1]}/members/${uid}`).get()).exists
   if (s[0] === 'dms') return s[1].split('_').includes(uid)
+  if (s[0] === 'chats') return ((await db.doc(`chats/${s[1]}`).get()).data()?.uids ?? []).includes(uid)
   return false
 }
 
@@ -44,7 +45,7 @@ export const handleReport = async (report: FirebaseFirestore.DocumentData | unde
       {
         contentPath: path,
         kind,
-        ...(kind === 'dm' ? { pairId: segments[1] } : kind === 'profile' ? {} : { groupId: segments[1] }),
+        ...(kind === 'dm' ? { pairId: segments[1] } : kind === 'chatMessage' ? { chatId: segments[1] } : kind === 'profile' ? {} : { groupId: segments[1] }),
         authorUid,
         authorPenName: kind === 'profile' ? fresh?.penName ?? '' : fresh?.author?.penName ?? '',
         snapshot: kind === 'profile' ? { title: fresh?.penName ?? '', text: fresh?.note ?? '' } : { ...(fresh?.title ? { title: fresh.title } : {}), text: textOf(fresh) },

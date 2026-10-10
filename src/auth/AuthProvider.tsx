@@ -72,6 +72,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setClaims(await readClaims(auth.currentUser, true))
   }, [])
 
+  // The confirmation link opens in another tab, so the token here still says
+  // unverified. Re-check when the person comes back, until it lands.
+  useEffect(() => {
+    if (!user || claims.emailVerified) return
+    const recheck = () => {
+      const current = auth.currentUser
+      if (!current || document.visibilityState !== 'visible') return
+      current
+        .reload()
+        .then(async () => {
+          if (current.emailVerified) setClaims(await readClaims(current, true))
+        })
+        .catch(() => undefined)
+    }
+    window.addEventListener('focus', recheck)
+    document.addEventListener('visibilitychange', recheck)
+    return () => {
+      window.removeEventListener('focus', recheck)
+      document.removeEventListener('visibilitychange', recheck)
+    }
+  }, [user, claims.emailVerified])
+
   // Functions change pro / banned on the profile; pull a fresh token when they drift
   useEffect(() => {
     if (!profile || !user) return

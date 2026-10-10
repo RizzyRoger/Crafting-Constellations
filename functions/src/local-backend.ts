@@ -29,6 +29,7 @@ const CALLABLES = [
   'setAdmin',
   'bootstrapAdmin',
   'createGroup',
+  'createChat',
 ] as const
 
 // The site gives up after 25s; anything older is not run, so a backlog never

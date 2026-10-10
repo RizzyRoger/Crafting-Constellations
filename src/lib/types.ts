@@ -79,6 +79,15 @@ export interface Connection {
   blockedBy?: string
 }
 
+// A private group chat among people the creator is connected with
+export interface Chat {
+  id: string
+  name: string
+  uids: string[]
+  createdBy: string
+  lastMessageAt: Timestamp | null
+}
+
 export interface Notice {
   id: string
   type: 'crisis' | 'held' | 'removed' | 'proApproved' | 'proDenied'
@@ -91,9 +100,10 @@ export interface Notice {
 export interface QueueItem {
   id: string
   contentPath: string
-  kind: 'post' | 'comment' | 'groupMessage' | 'dm' | 'profile'
+  kind: 'post' | 'comment' | 'groupMessage' | 'dm' | 'chatMessage' | 'profile'
   groupId?: string
   pairId?: string
+  chatId?: string
   authorUid: string
   authorPenName: string
   snapshot: { title?: string; text: string }

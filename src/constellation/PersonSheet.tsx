@@ -14,11 +14,10 @@ interface PersonSheetProps {
   connection?: Connection
   groups: Group[]
   onClose: () => void
-  canReachOut?: boolean
 }
 
 // What you can do with one person, depending on where the two of you stand
-export const PersonSheet = ({ person, me, verified, connection, groups, onClose, canReachOut = true }: PersonSheetProps) => {
+export const PersonSheet = ({ person, me, verified, connection, groups, onClose }: PersonSheetProps) => {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const pairId = pairIdOf(me, person.id)
@@ -72,18 +71,14 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose,
       ) : (
         <div className="row">
           {!connection &&
-            (canReachOut ? (
-              verified ? (
-                <button type="button" className="act act--wash" disabled={busy} onClick={run(() => requestConnection(me, person.id))}>
-                  Reach out
-                </button>
-              ) : (
-                <span className="hint">
-                  <Link to="/verify">Confirm your email</Link> to reach out.
-                </span>
-              )
+            (verified ? (
+              <button type="button" className="act act--wash" disabled={busy} onClick={run(() => requestConnection(me, person.id))}>
+                Reach out
+              </button>
             ) : (
-              <p className="meta">A friend’s friend. They can connect with you first.</p>
+              <span className="hint">
+                <Link to="/verify">Confirm your email</Link> to reach out.
+              </span>
             ))}
 
           {status === 'pending' && iAsked && (
@@ -97,9 +92,15 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose,
 
           {status === 'pending' && !iAsked && (
             <>
-              <button type="button" className="act act--wash" disabled={busy || !verified} onClick={run(() => acceptConnection(pairId))}>
-                Accept
-              </button>
+              {verified ? (
+                <button type="button" className="act act--wash" disabled={busy} onClick={run(() => acceptConnection(pairId))}>
+                  Accept
+                </button>
+              ) : (
+                <span className="hint">
+                  <Link to="/verify">Confirm your email</Link> to accept.
+                </span>
+              )}
               <button type="button" className="act" disabled={busy} onClick={run(() => removeConnection(pairId))}>
                 Not now
               </button>

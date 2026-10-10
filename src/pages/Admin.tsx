@@ -18,6 +18,7 @@ const KIND: Record<QueueItem['kind'], string> = {
   comment: 'Comment',
   groupMessage: 'Group talk',
   dm: 'Private note',
+  chatMessage: 'Private chat note',
   profile: 'Profile',
 }
 
@@ -46,6 +47,8 @@ const QueueEntry = ({ item }: { item: QueueItem }) => {
     <Link to={`/groups/${item.groupId}`}>{item.groupId}</Link>
   ) : item.kind === 'dm' ? (
     'private thread'
+  ) : item.kind === 'chatMessage' ? (
+    'private group chat'
   ) : (
     'profile'
   )
@@ -67,6 +70,7 @@ const QueueEntry = ({ item }: { item: QueueItem }) => {
         <p className="meta">matched: {item.automod.matches.map((m) => `“${m.term}” (${m.category})`).join(', ')}</p>
       ) : null}
       {item.kind === 'dm' && item.delivered && <p className="meta">Delivered to the other person with crisis resources shown to both.</p>}
+      {item.kind === 'chatMessage' && item.delivered && <p className="meta">Delivered to the chat with crisis resources shown to everyone in it.</p>}
       <div className="row">
         <button type="button" className="act act--quiet act--wash" disabled={busy} onClick={run(() => approveContent({ queueId: item.id }))}>
           {item.delivered || item.reports ? 'Keep it up' : 'Approve'}

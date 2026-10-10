@@ -8,12 +8,14 @@ import { PencilDefs } from './components/PencilDefs'
 import { Quiet } from './components/Quiet'
 import { Shell } from './components/Shell'
 import { AdminClaim } from './pages/AdminClaim'
+import { Chat } from './pages/Chat'
 import { Constellation } from './pages/Constellation'
 import { DeleteAccount } from './pages/DeleteAccount'
 import { Group } from './pages/Group'
 import { Landing } from './pages/Landing'
 import { Me } from './pages/Me'
 import { Messages } from './pages/Messages'
+import { NewChat } from './pages/NewChat'
 import { NotFound } from './pages/NotFound'
 import { Onboarding } from './pages/Onboarding'
 import { PostPage } from './pages/Post'
@@ -63,6 +65,8 @@ const routes: RouteObject[] = [
           { path: '/groups/:groupId/posts/:postId', element: <PostPage /> },
           { path: '/messages', element: <Messages /> },
           { path: '/messages/:pairId', element: <Thread /> },
+          { path: '/chats/new', element: <NewChat /> },
+          { path: '/chats/:chatId', element: <Chat /> },
           { path: '/me', element: <Me /> },
           { path: '/professional', element: <Professional /> },
           { path: '/admin/claim', element: <AdminClaim /> },
