@@ -102,7 +102,7 @@ service cloud.firestore {
 
       match /messages/{mid} {
         allow read: if signedIn() && (isAdmin() || (isMember(gid) && visible()));
-        allow create: if canWrite() && isMember(gid)
+        allow create: if canWrite() && verified() && isMember(gid)
           && newContent(['authorUid', 'text', 'status', 'createdAt'],
                         ['authorUid', 'text', 'status', 'createdAt'])
           && isStr(nd().text, 1, 1000);
@@ -112,7 +112,7 @@ service cloud.firestore {
 
       match /posts/{pid} {
         allow read: if signedIn() && (isAdmin() || (isMember(gid) && visible()));
-        allow create: if canWrite() && isMember(gid)
+        allow create: if canWrite() && verified() && isMember(gid)
           && newContent(['authorUid', 'title', 'body', 'status', 'createdAt'],
                         ['authorUid', 'body', 'status', 'createdAt'])
           && isStr(nd().body, 1, 4000)
@@ -122,7 +122,7 @@ service cloud.firestore {
 
         match /comments/{cid} {
           allow read: if signedIn() && (isAdmin() || (isMember(gid) && visible()));
-          allow create: if canWrite() && isMember(gid) && postPublished(gid, pid)
+          allow create: if canWrite() && verified() && isMember(gid) && postPublished(gid, pid)
             && newContent(['authorUid', 'text', 'status', 'createdAt'],
                           ['authorUid', 'text', 'status', 'createdAt'])
             && isStr(nd().text, 1, 1000);
@@ -133,7 +133,7 @@ service cloud.firestore {
         // Doc id = liker uid, so one like per person
         match /likes/{likerUid} {
           allow read: if signedIn() && (isAdmin() || isMember(gid));
-          allow create: if canWrite() && likerUid == me() && isMember(gid) && postPublished(gid, pid)
+          allow create: if canWrite() && verified() && likerUid == me() && isMember(gid) && postPublished(gid, pid)
             && nd().keys().hasOnly(['uid', 'createdAt'])
             && nd().uid == me()
             && nd().createdAt == request.time;
@@ -249,6 +249,7 @@ service cloud.firestore {
     }
 
     // ---------- admin-only ----------
+    match /rateLimits/{uid}   { allow read, write: if false; }
     match /modQueue/{qid}     { allow read: if isAdmin(); allow write: if false; }
     match /bans/{uid}         { allow read: if isAdmin(); allow write: if false; }
     match /adminActions/{id}  { allow read: if isAdmin(); allow write: if false; }

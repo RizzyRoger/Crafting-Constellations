@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { Composer } from '../components/Composer'
+import { ConfirmEmail } from '../components/ConfirmEmail'
 import { Item } from '../components/Item'
 import { LikeButton } from '../components/LikeButton'
 import { PageHead } from '../components/PageHead'
@@ -16,7 +17,7 @@ import { HEAD_DESCENDING } from '../wash/strokes'
 
 type Tab = 'talk' | 'posts'
 
-const Talk = ({ groupId, me }: { groupId: string; me: string }) => {
+const Talk = ({ groupId, me, verified }: { groupId: string; me: string; verified: boolean }) => {
   const messages = useLiveContent<Message>(`groups/${groupId}/messages`, me, { direction: 'asc', max: 80 })
   const end = useRef<HTMLDivElement>(null)
 
@@ -39,12 +40,12 @@ const Talk = ({ groupId, me }: { groupId: string; me: string }) => {
         ))}
         <div ref={end} />
       </div>
-      <Composer shape="bar" label="Message" submitLabel="Send" rows={1} onSubmit={send} />
+      {verified ? <Composer shape="bar" label="Message" submitLabel="Send" rows={1} onSubmit={send} /> : <ConfirmEmail />}
     </div>
   )
 }
 
-const Posts = ({ groupId, me }: { groupId: string; me: string }) => {
+const Posts = ({ groupId, me, verified }: { groupId: string; me: string; verified: boolean }) => {
   const posts = useLiveContent<Post>(`groups/${groupId}/posts`, me, { max: 40 })
 
   const publish = async (body: string, title?: string) => {
@@ -59,19 +60,33 @@ const Posts = ({ groupId, me }: { groupId: string; me: string }) => {
 
   return (
     <div className="stack" style={{ gap: 28 }}>
-      <Composer expandable label="Make a post" withTitle rows={4} max={4000} submitLabel="Send" onSubmit={publish} />
+      {verified ? (
+        <Composer expandable label="Make a post" withTitle rows={4} max={4000} submitLabel="Send" onSubmit={publish} />
+      ) : (
+        <ConfirmEmail />
+      )}
+      {posts.error && (
+        // #region agent log
+        fetch('http://127.0.0.1:7404/ingest/adb60411-22ef-4c89-8427-3ded0fdd934d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'19dc83'},body:JSON.stringify({sessionId:'19dc83',hypothesisId:'A',location:'Group.tsx:posts',message:'posts query error surfaced',data:{groupId,error:posts.error.message,verified},timestamp:Date.now()})}).catch(()=>{}),
+        // #endregion
+        null
+      )}
       {posts.data.length === 0 && !posts.loading ? (
         <p className="empty">No posts yet.</p>
       ) : (
         <ul className="post-list">
-          {posts.data.map((p) => (
+          {posts.data.map((p) => {
+            // #region agent log
+            if (p.status === 'published' && !p.title) fetch('http://127.0.0.1:7404/ingest/adb60411-22ef-4c89-8427-3ded0fdd934d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'19dc83'},body:JSON.stringify({sessionId:'19dc83',hypothesisId:'D',location:'Group.tsx:post-link',message:'published post without a title',data:{verified,hasCommentLink:verified},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+            return (
             <li key={p.id}>
               <Item
                 item={p}
                 me={me}
                 variant="card"
                 actions={
-                  p.status === 'published' && (
+                  p.status === 'published' && verified && (
                     <>
                       <LikeButton postPath={p.path} me={me} count={p.likeCount} />
                       <Link to={`/groups/${groupId}/posts/${p.id}`} className="mark" aria-label={p.commentCount ? `${p.commentCount} comments` : 'Comment'}>
@@ -91,7 +106,8 @@ const Posts = ({ groupId, me }: { groupId: string; me: string }) => {
                 <p className="voice">{p.body.length > 600 ? `${p.body.slice(0, 600)}…` : p.body}</p>
               </Item>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>
@@ -100,7 +116,7 @@ const Posts = ({ groupId, me }: { groupId: string; me: string }) => {
 
 export const Group = () => {
   const { groupId = '' } = useParams()
-  const { uid } = useMe()
+  const { uid, claims } = useMe()
   const [params, setParams] = useSearchParams()
   const tab: Tab = params.get('tab') === 'posts' ? 'posts' : 'talk'
   const group = useDocData<GroupDoc>(`groups/${groupId}`)
@@ -174,7 +190,11 @@ export const Group = () => {
               Posts
             </button>
           </div>
-          {tab === 'talk' ? <Talk groupId={groupId} me={uid} /> : <Posts groupId={groupId} me={uid} />}
+          {tab === 'talk' ? (
+            <Talk groupId={groupId} me={uid} verified={claims.emailVerified} />
+          ) : (
+            <Posts groupId={groupId} me={uid} verified={claims.emailVerified} />
+          )}
         </>
       ) : (
         <p className="empty">Join to read and write here. You can leave any time.</p>

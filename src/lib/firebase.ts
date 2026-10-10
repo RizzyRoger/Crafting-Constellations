@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase/app'
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
 import { connectAuthEmulator, getAuth } from 'firebase/auth'
 import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore'
 import { connectFunctionsEmulator, getFunctions } from 'firebase/functions'
@@ -21,6 +22,15 @@ export const functions = getFunctions(app, 'us-central1')
 export const storage = getStorage(app)
 
 export const USING_EMULATORS = env.VITE_USE_EMULATORS === 'true'
+
+// Production bot check. Emulators skip it; a missing site key leaves local and CI unchanged.
+const appCheckKey = env.VITE_APPCHECK_SITE_KEY
+if (!USING_EMULATORS && typeof appCheckKey === 'string' && appCheckKey.length > 0) {
+  initializeAppCheck(app, {
+    provider: new ReCaptchaV3Provider(appCheckKey),
+    isTokenAutoRefreshEnabled: true,
+  })
+}
 
 // 127.0.0.1, not localhost: some resolvers pick IPv6 ::1, which the emulators don't bind
 if (USING_EMULATORS) {
