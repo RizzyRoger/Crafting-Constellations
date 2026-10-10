@@ -6,7 +6,7 @@ import { useMe } from '../auth/AuthProvider'
 import { PageHead } from '../components/PageHead'
 import { Quiet } from '../components/Quiet'
 import { describeError } from '../lib/callables'
-import { db, storage } from '../lib/firebase'
+import { db, LOCAL_BACKEND, storage } from '../lib/firebase'
 import { useDocData } from '../lib/live'
 import type { ProApplication } from '../lib/types'
 
@@ -100,6 +100,16 @@ export const Professional = () => {
         <div className="banner">
           <p className="pencil note">Thank you. Your application is with a moderator. You’ll find a note under “You” when it’s been reviewed.</p>
         </div>
+      </>
+    )
+  }
+
+  // Licence documents need Storage, which the project can't use until billing is on
+  if (LOCAL_BACKEND) {
+    return (
+      <>
+        {head}
+        <p className="pencil note">Applications are paused for a little while: we can’t take licence documents just yet. Please check back soon.</p>
       </>
     )
   }

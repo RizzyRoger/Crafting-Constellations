@@ -1,8 +1,8 @@
-import { setGlobalOptions } from 'firebase-functions/v2'
-
-setGlobalOptions({ region: 'us-central1', maxInstances: 10 })
+// First: global options must be set before any function below is defined
+import './options.js'
 
 export { saveProfile } from './profile.js'
+export { deleteAccount } from './account.js'
 export { moderatePost, moderateComment, moderateGroupMessage, moderateDm, moderateChatMessage } from './content.js'
 export { countMembers, countLikes, countComments } from './counters.js'
 export { onReportCreated } from './reports.js'

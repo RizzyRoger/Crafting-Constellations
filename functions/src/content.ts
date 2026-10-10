@@ -9,7 +9,7 @@ import { moderate } from './moderation/index.js'
 // - crisis in a DM / chat → published with `crisis: true` (everyone in it sees resources), queued at priority 2
 // - crisis elsewhere      → held for a person to read; the author sees resources
 // - anything else flagged → held, queued for review
-// - author banned         → removed
+// - author banned or gone → removed (gone: deleted their account while this was in flight)
 export const handleNewContent = async (ref: DocumentReference) => {
   const kind = kindOf(ref.path)
   if (!kind || kind === 'profile') return
@@ -29,7 +29,7 @@ export const handleNewContent = async (ref: DocumentReference) => {
     const now = FieldValue.serverTimestamp()
     const { flooded, stamps } = applyFlood(rateSnap.data()?.stamps, Date.now())
 
-    if (banSnap.exists) {
+    if (banSnap.exists || !userSnap.exists) {
       tx.update(ref, { status: 'removed', removedBy: 'automod', removedAt: now })
       return
     }

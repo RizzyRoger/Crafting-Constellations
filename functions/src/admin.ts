@@ -1,8 +1,9 @@
 import { FieldValue } from 'firebase-admin/firestore'
 import { defineList } from 'firebase-functions/params'
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https'
-import { auth, db } from './app.js'
+import { auth, db, logAction, NOT_FOUND } from './app.js'
 import { checkPenName, suggestPenName } from './moderation/index.js'
+import { callable } from './options.js'
 
 const ADMIN_EMAILS = defineList('ADMIN_EMAILS', { default: [] })
 
@@ -24,15 +25,31 @@ const mergeClaims = async (uid: string, patch: Record<string, unknown>) => {
   await auth.setCustomUserClaims(uid, { ...current, ...patch })
 }
 
-const logAction = (actorUid: string, action: string, target: string, details: Record<string, unknown> = {}) =>
-  db.collection('adminActions').add({ actorUid, action, target, details, at: FieldValue.serverTimestamp() })
+// The writer may have deleted their account, and the item with it, since it was queued
+const missing = (error: { code?: number }) => {
+  if (error.code === NOT_FOUND) return true
+  throw error
+}
 
 const notify = (uid: string, type: string, extra: Record<string, unknown> = {}) =>
   db.collection(`users/${uid}/notices`).add({ type, ...extra, createdAt: FieldValue.serverTimestamp(), seen: false })
 
+// Reset a reported profile to a quiet generated name and clear the note
+const resetProfile = (uid: string, now: FieldValue) =>
+  db.runTransaction(async (tx) => {
+    const profile = (await tx.get(db.doc(`users/${uid}`))).data()
+    let name = suggestPenName()
+    for (let i = 0; i < 8 && (await tx.get(db.doc(`penNames/${name.toLowerCase()}`))).exists; i++) {
+      name = `${suggestPenName()} ${Math.floor(Math.random() * 90 + 10)}`
+    }
+    if (profile?.penNameLower) tx.delete(db.doc(`penNames/${profile.penNameLower}`))
+    tx.set(db.doc(`penNames/${name.toLowerCase()}`), { uid })
+    tx.update(db.doc(`users/${uid}`), { penName: name, penNameLower: name.toLowerCase(), note: '', updatedAt: now })
+  })
+
 // ---------- review queue ----------
 
-export const approveContent = onCall<{ queueId: string }>(async (request) => {
+export const approveContent = onCall<{ queueId: string }>(callable(), async (request) => {
   const actor = requireAdmin(request)
   const queueRef = db.doc(`modQueue/${str(request.data?.queueId, 'queueId', 1500)}`)
 
@@ -60,39 +77,28 @@ export const approveContent = onCall<{ queueId: string }>(async (request) => {
   return { ok: true }
 })
 
-export const removeContent = onCall<{ queueId: string; note?: string }>(async (request) => {
+export const removeContent = onCall<{ queueId: string; note?: string }>(callable(), async (request) => {
   const actor = requireAdmin(request)
   const queueRef = db.doc(`modQueue/${str(request.data?.queueId, 'queueId', 1500)}`)
   const queued = (await queueRef.get()).data()
   if (!queued) throw new HttpsError('not-found', 'queue item')
   const now = FieldValue.serverTimestamp()
 
-  if (queued.kind === 'profile') {
-    // Reset a reported profile to a quiet generated name and clear the note
-    const uid: string = queued.authorUid
-    await db.runTransaction(async (tx) => {
-      const profile = (await tx.get(db.doc(`users/${uid}`))).data()
-      let name = suggestPenName()
-      for (let i = 0; i < 8 && (await tx.get(db.doc(`penNames/${name.toLowerCase()}`))).exists; i++) {
-        name = `${suggestPenName()} ${Math.floor(Math.random() * 90 + 10)}`
-      }
-      if (profile?.penNameLower) tx.delete(db.doc(`penNames/${profile.penNameLower}`))
-      tx.set(db.doc(`penNames/${name.toLowerCase()}`), { uid })
-      tx.update(db.doc(`users/${uid}`), { penName: name, penNameLower: name.toLowerCase(), note: '', updatedAt: now })
-    })
-  } else {
-    await db.doc(queued.contentPath).update({ status: 'removed', removedBy: actor, removedAt: now })
-  }
+  const removal =
+    queued.kind === 'profile'
+      ? resetProfile(queued.authorUid, now)
+      : db.doc(queued.contentPath).update({ status: 'removed', removedBy: actor, removedAt: now })
+  const gone = await removal.then(() => false, missing)
 
   await queueRef.update({ state: 'resolved', resolution: 'removed', resolvedBy: actor, resolvedAt: now, updatedAt: now })
-  await notify(queued.authorUid, 'removed', { contentPath: queued.contentPath })
+  if (!gone) await notify(queued.authorUid, 'removed', { contentPath: queued.contentPath })
   await logAction(actor, 'removeContent', request.data.queueId, { note: request.data.note ?? '' })
   return { ok: true }
 })
 
 // ---------- people ----------
 
-export const banUser = onCall<{ uid: string; reason: string; hideContent?: boolean }>(async (request) => {
+export const banUser = onCall<{ uid: string; reason: string; hideContent?: boolean }>(callable(), async (request) => {
   const actor = requireAdmin(request)
   const uid = str(request.data?.uid, 'uid', 128)
   const reason = str(request.data?.reason, 'reason', 500)
@@ -127,7 +133,7 @@ export const banUser = onCall<{ uid: string; reason: string; hideContent?: boole
   return { ok: true }
 })
 
-export const unbanUser = onCall<{ uid: string }>(async (request) => {
+export const unbanUser = onCall<{ uid: string }>(callable(), async (request) => {
   const actor = requireAdmin(request)
   const uid = str(request.data?.uid, 'uid', 128)
   await db.doc(`bans/${uid}`).delete()
@@ -139,6 +145,7 @@ export const unbanUser = onCall<{ uid: string }>(async (request) => {
 })
 
 export const reviewProfessional = onCall<{ uid: string; decision: 'approve' | 'deny' | 'revoke'; note?: string }>(
+  callable(),
   async (request) => {
     const actor = requireAdmin(request)
     const uid = str(request.data?.uid, 'uid', 128)
@@ -162,7 +169,7 @@ export const reviewProfessional = onCall<{ uid: string; decision: 'approve' | 'd
   },
 )
 
-export const setAdmin = onCall<{ uid: string; admin: boolean }>(async (request) => {
+export const setAdmin = onCall<{ uid: string; admin: boolean }>(callable(), async (request) => {
   const actor = requireAdmin(request)
   const uid = str(request.data?.uid, 'uid', 128)
   if (uid === actor && request.data.admin === false) throw new HttpsError('failed-precondition', 'Ask another admin.')
@@ -172,7 +179,7 @@ export const setAdmin = onCall<{ uid: string; admin: boolean }>(async (request) 
 })
 
 // First admin: a verified account whose email is listed in ADMIN_EMAILS
-export const bootstrapAdmin = onCall(async (request) => {
+export const bootstrapAdmin = onCall(callable(), async (request) => {
   const token = request.auth?.token
   if (!request.auth || token?.email_verified !== true || typeof token.email !== 'string') {
     throw new HttpsError('permission-denied', 'Verify your email first.')
@@ -186,7 +193,7 @@ export const bootstrapAdmin = onCall(async (request) => {
 
 // ---------- groups ----------
 
-export const createGroup = onCall<{ name: string; constellationId: string; description?: string }>(async (request) => {
+export const createGroup = onCall<{ name: string; constellationId: string; description?: string }>(callable(), async (request) => {
   const actor = requireAdmin(request)
   const name = str(request.data?.name, 'name', 60)
   const description = typeof request.data.description === 'string' ? request.data.description.slice(0, 280) : ''

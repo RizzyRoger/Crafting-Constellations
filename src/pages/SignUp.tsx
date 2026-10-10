@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { describeError } from '../lib/callables'
 import { auth } from '../lib/firebase'
+import { trackSignIn } from '../lib/telemetry'
 import { AuthLayout } from './AuthLayout'
 
 export const SignUp = () => {
@@ -21,8 +22,9 @@ export const SignUp = () => {
     setBusy(true)
     setError(null)
     try {
-      const { user } = await createUserWithEmailAndPassword(auth, email.trim(), password)
-      await sendEmailVerification(user).catch(() => undefined)
+      const credential = await createUserWithEmailAndPassword(auth, email.trim(), password)
+      trackSignIn(credential, 'password')
+      await sendEmailVerification(credential.user).catch(() => undefined)
       navigate('/onboarding')
     } catch (e) {
       setError(describeError(e))
@@ -34,7 +36,7 @@ export const SignUp = () => {
   const google = async () => {
     setError(null)
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider())
+      trackSignIn(await signInWithPopup(auth, new GoogleAuthProvider()), 'google')
       navigate('/onboarding')
     } catch (e) {
       setError(describeError(e))

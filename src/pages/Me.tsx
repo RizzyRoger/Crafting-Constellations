@@ -10,6 +10,7 @@ import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import { otherInPair } from '../lib/pair'
 import { acceptConnection, blockConnection, removeConnection } from '../lib/social'
+import { setCountVisits, TELEMETRY_AVAILABLE, useCountVisits } from '../lib/telemetry'
 import { ago } from '../lib/time'
 import type { Connection, Notice, Profile } from '../lib/types'
 
@@ -24,6 +25,7 @@ const NOTICE_TEXT: Record<Notice['type'], string> = {
 export const Me = () => {
   const { uid, profile, claims, user } = useMe()
   const signOut = useSignOut()
+  const countVisits = useCountVisits()
 
   const notices = useQueryData<Notice>(`notices|${uid}`, () =>
     query(collection(db, `users/${uid}/notices`), orderBy('createdAt', 'desc'), limit(20)),
@@ -158,10 +160,20 @@ export const Me = () => {
           Signed in as {user.email ?? 'a Google account'} — only you see this.{' '}
           {claims.emailVerified ? 'Email confirmed.' : <Link to="/verify">Confirm your email.</Link>}
         </p>
+        {TELEMETRY_AVAILABLE && (
+          <label className="code row" style={{ gap: 6 }}>
+            <input type="checkbox" checked={countVisits === 'yes'} onChange={(e) => void setCountVisits(e.target.checked)} />
+            Count my visits on this device
+            <span className="meta">— which pages open and how fast they load, never your name or your writing</span>
+          </label>
+        )}
         <div className="row">
           <button type="button" className="act" onClick={() => void signOut()}>
             Sign out
           </button>
+          <Link to="/delete-account" className="link-btn">
+            Delete my account…
+          </Link>
         </div>
       </section>
     </>
