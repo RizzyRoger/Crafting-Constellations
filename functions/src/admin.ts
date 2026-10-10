@@ -1,8 +1,9 @@
 import { FieldValue } from 'firebase-admin/firestore'
 import { defineList } from 'firebase-functions/params'
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https'
-import { auth, db, logAction, NOT_FOUND } from './app.js'
+import { auth, db, logAction, NOT_FOUND, snapshotOf } from './app.js'
 import { checkPenName, suggestPenName } from './moderation/index.js'
+import { applyNotices, planNotices } from './notify.js'
 import { callable } from './options.js'
 
 const ADMIN_EMAILS = defineList('ADMIN_EMAILS', { default: [] })
@@ -61,7 +62,14 @@ export const approveContent = onCall<{ queueId: string }>(callable(), async (req
       const contentRef = db.doc(queued.contentPath)
       const content = (await tx.get(contentRef)).data()
       if (content && ['held', 'pending'].includes(content.status)) {
-        tx.update(contentRef, { status: 'published', publishedAt: now })
+        // Held writing pings nobody until now; the reads go before the writes
+        const notices = await planNotices(tx, queued.contentPath, content, content.author ?? snapshotOf(content.authorUid, undefined))
+        tx.update(contentRef, {
+          status: 'published',
+          publishedAt: now,
+          ...(notices.mentioned.length > 0 ? { mentioned: notices.mentioned } : {}),
+        })
+        applyNotices(tx, notices)
         if (queued.kind === 'dm') {
           tx.set(db.doc(`dms/${queued.pairId}`), { uids: String(queued.pairId).split('_'), lastMessageAt: now, lastAuthorUid: queued.authorUid }, { merge: true })
         }

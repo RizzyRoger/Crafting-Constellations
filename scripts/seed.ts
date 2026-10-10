@@ -329,6 +329,22 @@ const recount = async () => {
   console.log('  counters recounted')
 }
 
+// Your own account, if it has a pen name: one @mention in a group it joined, so Notifications has a ping
+const seedMentionForMe = async (meUid: string) => {
+  const penName: string | undefined = (await db.doc(`users/${meUid}`).get()).data()?.penName
+  if (!penName) return
+  const ref = db.collection('groups/kitchen-table/messages').doc()
+  await ref.set({
+    authorUid: 'synth14',
+    text: `@${penName} we saved you a seat for Thursday’s soup rota. (sample)`,
+    mentions: [meUid],
+    status: 'pending',
+    createdAt: minutesAgo(30),
+  })
+  await waitFor(async () => (await ref.get()).data()?.status !== 'pending', `mention ${ref.id}`)
+  console.log(`  1 mention for ${penName}`)
+}
+
 const main = async () => {
   const meUid = process.env.SEED_ME_UID?.trim() || undefined
   console.log(`Seeding ${PROJECT_ID}${meUid ? ` (joining ${meUid})` : ''}…`)
@@ -340,6 +356,7 @@ const main = async () => {
   await seedGroups(meUid)
   await seedConnections(meUid)
   const comments = await seedWriting()
+  if (meUid) await seedMentionForMe(meUid)
   if (comments[0]) await seedReport(comments[0])
   await seedProApplication()
   await recount()

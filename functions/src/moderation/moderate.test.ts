@@ -39,6 +39,22 @@ describe('moderate — harassment', () => {
   })
 })
 
+describe('moderate — @mentions', () => {
+  it.each(['thank you @Fern for the soup', '@Quiet Heron see you thursday', 'love you @Fern'])('publishes %j', (text) => {
+    expect(held(text).action).toBe('publish')
+  })
+
+  // An @ at the start of a word used to read as "a" ("@idiot" → "aidiot") and hide the insult
+  it.each(['you @idiot', 'love you @Loser', '@Fern kys'])('still reads the word after an @: %j', (text) => {
+    expect(held(text)).toMatchObject({ action: 'hold', categories: ['harassment'] })
+  })
+
+  it('still reads an @ inside a word as an "a", and an email as contact details', () => {
+    expect(held('you are so p@thetic').action).toBe('hold')
+    expect(held('write to fern@example.test').categories).toContain('personalInfo')
+  })
+})
+
 describe('moderate — slurs', () => {
   it('holds a slur, including leetspeak', () => {
     const result = held(`you ${rot13('ergneq').replace('e', '3').replace('a', '4')}`)

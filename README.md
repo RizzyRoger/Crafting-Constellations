@@ -43,7 +43,7 @@ npm run dev:live
 - **Sample accounts:** `synth01@example.test` … `synth16@example.test`, password in `scripts/seed.ts`. `synth01` is a moderator, `synth02` is a licensed professional. Everything seeded is marked "sample".
 - **Email confirmation (emulator):** the link is printed in the emulator terminal and listed at http://127.0.0.1:4000/auth.
 - **After reseeding,** reload the app: wiping the emulator under an open tab confuses the Firestore client.
-- **Your own account:** `SEED_ME_UID=<your uid> npm run seed` joins it to two groups and gives it two incoming connection requests.
+- **Your own account:** `SEED_ME_UID=<your uid> npm run seed` joins it to two groups and gives it two incoming connection requests and one @mention.
 
 ## Tests
 

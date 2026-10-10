@@ -47,6 +47,12 @@ service cloud.firestore {
         && nd().status == 'pending'
         && nd().createdAt == request.time;
     }
+    // Optional @mentions: the uids the writer picked (up to 10, as MAX_MENTIONS).
+    // Functions check each one before anyone is pinged; clients never set `mentioned`.
+    function mentionsOk() {
+      return !('mentions' in nd())
+        || (nd().mentions is list && nd().mentions.size() >= 1 && nd().mentions.size() <= 10);
+    }
     function visible() {
       return resource.data.status == 'published' || resource.data.authorUid == me();
     }
@@ -103,9 +109,9 @@ service cloud.firestore {
       match /messages/{mid} {
         allow read: if signedIn() && (isAdmin() || (isMember(gid) && visible()));
         allow create: if canWrite() && verified() && isMember(gid)
-          && newContent(['authorUid', 'text', 'status', 'createdAt'],
+          && newContent(['authorUid', 'text', 'status', 'createdAt', 'mentions'],
                         ['authorUid', 'text', 'status', 'createdAt'])
-          && isStr(nd().text, 1, 1000);
+          && isStr(nd().text, 1, 1000) && mentionsOk();
         allow update: if canWrite() && isWithdrawal();
         allow delete: if false;
       }
@@ -113,19 +119,20 @@ service cloud.firestore {
       match /posts/{pid} {
         allow read: if signedIn() && (isAdmin() || (isMember(gid) && visible()));
         allow create: if canWrite() && verified() && isMember(gid)
-          && newContent(['authorUid', 'title', 'body', 'status', 'createdAt'],
+          && newContent(['authorUid', 'title', 'body', 'status', 'createdAt', 'mentions'],
                         ['authorUid', 'body', 'status', 'createdAt'])
           && isStr(nd().body, 1, 4000)
-          && (!('title' in nd()) || isStr(nd().title, 1, 120));
+          && (!('title' in nd()) || isStr(nd().title, 1, 120))
+          && mentionsOk();
         allow update: if canWrite() && isWithdrawal();
         allow delete: if false;
 
         match /comments/{cid} {
           allow read: if signedIn() && (isAdmin() || (isMember(gid) && visible()));
           allow create: if canWrite() && verified() && isMember(gid) && postPublished(gid, pid)
-            && newContent(['authorUid', 'text', 'status', 'createdAt'],
+            && newContent(['authorUid', 'text', 'status', 'createdAt', 'mentions'],
                           ['authorUid', 'text', 'status', 'createdAt'])
-            && isStr(nd().text, 1, 1000);
+            && isStr(nd().text, 1, 1000) && mentionsOk();
           allow update: if canWrite() && isWithdrawal();
           allow delete: if false;
         }
@@ -220,9 +227,9 @@ service cloud.firestore {
         }
         allow read: if verified() && inChat() && visible();
         allow create: if canWrite() && verified() && inChat()
-          && newContent(['authorUid', 'text', 'status', 'createdAt'],
+          && newContent(['authorUid', 'text', 'status', 'createdAt', 'mentions'],
                         ['authorUid', 'text', 'status', 'createdAt'])
-          && isStr(nd().text, 1, 1000);
+          && isStr(nd().text, 1, 1000) && mentionsOk();
         allow update: if canWrite() && inChat() && isWithdrawal();
         allow delete: if false;
       }

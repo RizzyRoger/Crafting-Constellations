@@ -1,5 +1,34 @@
 # Crafting Constellations — web app (Firebase)
 
+## Notifications, @mentions, seamless paper, draggable chart (2026-10-10)
+
+Plan: `/Users/darren/.claude/plans/i-want-you-to-quiet-stardust.md`
+
+- [x] 0. Synced with main (7099d22: private group chats)
+- [x] 1. Paper grain tiles without seams (filter region pinned to the tile). Mottle tile edge step: 32× the inside step before, ordinary noise after (81st–90th percentile of its own rows/columns)
+- [x] 2. Notifications + @mentions
+  - [x] shared `mentions.ts` (+ tests)
+  - [x] server: `notify.ts` in `handleNewContent` and `approveContent`; accepted notices (function + local backend); purge; rules; index
+  - [x] client: Composer autocomplete, `MentionText`, Notifications page, rail link, Me cleanup; seed gives `SEED_ME_UID` a mention
+  - [x] tests: unit 115, rules 48, local-backend e2e 10, deleteAccount e2e 5
+  - [x] browser (own emulators on other ports, two people): @ list by keyboard and pointer, highlight from the server, comment / mention / accepted notices, opening one marks it read, Mark all read, withdrawn → "No longer here", 375px no sideways scroll
+  - Found while checking: reading a withdrawn item's document (or a query pinned to its id) is refused, and the refused listen broke the Firestore client. Excerpts now ask for "published at this time" (`contentAt`).
+- [x] 3. Draggable Friends chart (spring physics, your dot fixed)
+  - `egoPhysics.ts`: line springs at their drawn length, a push between dots (capped up close), you pinned; settled before the first paint; a dropped dot keeps its new angle, not its old place (no pull home, like Obsidian)
+  - browser at 393px: a real mouse drag lands under the pointer, neighbours follow, release drifts to rest (~6s at most), the drag doesn't open the sheet, a click still does, your dot can't move; labels kept inside the edges
+  - Found while checking: a quick drag can end before the next frame, so the held dot is placed on each move, not only per frame
+- [x] 4. Verify: typecheck, functions build, unit 124, rules 48, local-backend e2e 10, deleteAccount e2e 5, build; browser as above. Run on separate emulator ports beside the main checkout's suite.
+
+### Review
+
+- **Delivered:** seamless paper; Notifications page (requests, mentions, comments on your posts, accepted requests, moderator notes) with an unread count in the rail; @mentions in group talk, posts, comments and private group chats; draggable Friends chart.
+- **Decisions:** pings are checked and written by functions when writing is published (held writing pings nobody until approved); notices hold no copy of the words; moderator notes moved from You to Notifications; DMs have no @ (both people already see every line); the chart has no pull back home, so a dropped dot keeps its new angle.
+- **Fixed before the PR (user: "fix the bugs"):**
+  - the local backend now announces acceptances from the last 3 days on start (`acceptedWhileAway`; the notice id makes each one once only), e2e covered;
+  - automod read a word-initial `@` as "a", so "love you @Loser" slipped past where "love you Loser" is held. A fourth view drops that `@` (`unmarked`); "@ss"-style leet is still read by the old view. Probed: no real pen name is newly held by it;
+  - merged main with `fill-app-panes` (PR #5, full-height panes): no conflicts; the @ list opens inside the pane, on top of the chat, unclipped (checked in the browser).
+- Verified after: unit 133, rules 48, local-backend e2e 11, deleteAccount e2e 5, typecheck, both builds.
+
 ## Reach out, Accept, and private group chats (2026-10-10)
 
 Plan: `/Users/darren/.claude/plans/this-site-is-looking-giggly-robin.md`

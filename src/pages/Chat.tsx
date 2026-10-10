@@ -9,6 +9,7 @@ import { Who } from '../components/Who'
 import { describeError } from '../lib/callables'
 import { db } from '../lib/firebase'
 import { useDocData, useQueryData } from '../lib/live'
+import { among } from '../lib/people'
 import { leaveChat } from '../lib/social'
 import type { Chat as ChatDoc, Profile } from '../lib/types'
 import { HEAD_DESCENDING } from '../wash/strokes'
@@ -76,7 +77,15 @@ export const Chat = () => {
 
       {error && <p className="error">{error}</p>}
 
-      <Talk path={`chats/${chatId}/messages`} me={uid} verified={verified} label="Private chat" empty="Nothing written yet." privateThread />
+      <Talk
+        path={`chats/${chatId}/messages`}
+        me={uid}
+        verified={verified}
+        label="Private chat"
+        empty="Nothing written yet."
+        privateThread
+        people={among(people.data, chat.data.uids, uid)}
+      />
     </>
   )
 }

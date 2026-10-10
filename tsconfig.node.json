@@ -13,7 +13,10 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@moderation": ["./functions/src/moderation/index.ts"]
+    }
   },
   "include": ["vite.config.ts", "vitest.config.ts", "vitest.rules.config.ts", "vitest.e2e.config.ts", "scripts", "tests", "src/**/*.test.ts", "functions/src/**/*.test.ts"]
 }

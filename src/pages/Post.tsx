@@ -5,9 +5,11 @@ import { Composer } from '../components/Composer'
 import { ConfirmEmail } from '../components/ConfirmEmail'
 import { Item } from '../components/Item'
 import { LikeButton } from '../components/LikeButton'
+import { MentionText } from '../components/MentionText'
 import { Quiet } from '../components/Quiet'
 import { db } from '../lib/firebase'
 import { useDocData, useLiveContent } from '../lib/live'
+import { useGroupPeople } from '../lib/people'
 import type { Comment, Group, Post } from '../lib/types'
 
 export const PostPage = () => {
@@ -19,6 +21,7 @@ export const PostPage = () => {
   const member = Boolean(membership.data) && !membership.pending
   const post = useDocData<Post>(member ? path : null)
   const comments = useLiveContent<Comment>(post.data ? `${path}/comments` : null, uid, { direction: 'asc', max: 100 })
+  const people = useGroupPeople(member ? groupId : null, uid)
 
   if (membership.loading || post.loading) return <Quiet>Opening the post…</Quiet>
   if (!member) {
@@ -36,8 +39,14 @@ export const PostPage = () => {
     )
   }
 
-  const reply = async (text: string) => {
-    await addDoc(collection(db, `${path}/comments`), { authorUid: uid, text, status: 'pending', createdAt: serverTimestamp() })
+  const reply = async (text: string, _title: string | undefined, mentions: string[]) => {
+    await addDoc(collection(db, `${path}/comments`), {
+      authorUid: uid,
+      text,
+      ...(mentions.length > 0 ? { mentions } : {}),
+      status: 'pending',
+      createdAt: serverTimestamp(),
+    })
   }
 
   return (
@@ -65,7 +74,7 @@ export const PostPage = () => {
         }
       >
         {post.data.title && <h1 className="post__title" style={{ fontSize: 30 }}>{post.data.title}</h1>}
-        <p className="voice">{post.data.body}</p>
+        <MentionText text={post.data.body} mentioned={post.data.mentioned} me={uid} />
       </Item>
 
       <section className="section comment-break" aria-labelledby="comments">
@@ -77,14 +86,14 @@ export const PostPage = () => {
           {comments.data.map((c) => (
             <li key={c.id}>
               <Item item={c} me={uid} blotSize={36} variant="comment">
-                <p className="voice">{c.text}</p>
+                <MentionText text={c.text} mentioned={c.mentioned} me={uid} />
               </Item>
             </li>
           ))}
         </ul>
         {post.data.status === 'published' &&
           (claims.emailVerified ? (
-            <Composer shape="bar" label="Comment" submitLabel="Send" rows={1} onSubmit={reply} />
+            <Composer shape="bar" label="Comment" submitLabel="Send" rows={1} people={people} onSubmit={reply} />
           ) : (
             <ConfirmEmail />
           ))}

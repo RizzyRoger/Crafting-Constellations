@@ -42,12 +42,14 @@ export const purgeAccount = async (uid: string) => {
   await deleteTrees(posts)
 
   // 3. Private threads, both sides. Their own lines also find threads that have no thread doc yet.
-  const [comments, messages, likes, reports, queued] = await Promise.all([
+  const [comments, messages, likes, reports, queued, pings] = await Promise.all([
     refsOf(db.collectionGroup('comments').where('authorUid', '==', uid)),
     refsOf(db.collectionGroup('messages').where('authorUid', '==', uid)),
     refsOf(db.collectionGroup('likes').where('uid', '==', uid)),
     refsOf(db.collection('reports').where('reporterUid', '==', uid)),
     refsOf(db.collection('modQueue').where('authorUid', '==', uid)),
+    // Mentions, comments and acceptances they caused in other people's notifications
+    refsOf(db.collectionGroup('notices').where('actorUid', '==', uid)),
   ])
   const pairs = [
     ...new Set([
@@ -58,8 +60,8 @@ export const purgeAccount = async (uid: string) => {
   ]
   const threads = await deleteTrees(pairs.map((pair) => db.doc(`dms/${pair}`)))
 
-  // 4. Their comments, group talk, likes and reports elsewhere (counters follow by trigger)
-  const writing = await deleteAll([...comments, ...messages, ...likes, ...reports])
+  // 4. Their comments, group talk, likes, reports and notices elsewhere (counters follow by trigger)
+  const writing = await deleteAll([...comments, ...messages, ...likes, ...reports, ...pings])
 
   // 5. Review-queue items that would now point at nothing
   const orphaned = await Promise.all([
