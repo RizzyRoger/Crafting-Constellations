@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { commentRecipient, pickMentioned, requestedMentions, type Reader } from './notifyPolicy.js'
+import { acceptedWhileAway, commentRecipient, MISSED_ACCEPT_MS, pickMentioned, requestedMentions, type Reader } from './notifyPolicy.js'
 
 const reader = (uid: string, penName: string | undefined, patch: Partial<Reader> = {}): Reader => ({
   uid,
@@ -69,5 +69,22 @@ describe('commentRecipient', () => {
     expect(commentRecipient(reader('poster', 'Poster', { blocked: true }), 'commenter', [])).toBeNull()
     expect(commentRecipient(reader('poster', undefined), 'commenter', [])).toBeNull()
     expect(commentRecipient(undefined, 'commenter', [])).toBeNull()
+  })
+})
+
+describe('acceptedWhileAway', () => {
+  const now = Date.UTC(2026, 9, 10, 12)
+
+  it('catches up on acceptances from the last few days', () => {
+    expect(acceptedWhileAway('accepted', now - 60_000, now)).toBe(true)
+    expect(acceptedWhileAway('accepted', now - MISSED_ACCEPT_MS, now)).toBe(true)
+  })
+
+  it('leaves older acceptances, requests still waiting, blocks, and times it can’t read', () => {
+    expect(acceptedWhileAway('accepted', now - MISSED_ACCEPT_MS - 1, now)).toBe(false)
+    expect(acceptedWhileAway('pending', now - 60_000, now)).toBe(false)
+    expect(acceptedWhileAway('blocked', now - 60_000, now)).toBe(false)
+    expect(acceptedWhileAway('accepted', undefined, now)).toBe(false)
+    expect(acceptedWhileAway('accepted', now + 60_000, now)).toBe(false)
   })
 })

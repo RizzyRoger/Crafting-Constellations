@@ -100,6 +100,7 @@ export const startLocalBackend = async () => {
   const { handleNewContent } = await import('./content.js')
   const { handleReport } = await import('./reports.js')
   const { mirrorFriendshipOf, noticeOnAccept } = await import('./friendships.js')
+  const { acceptedWhileAway } = await import('./notifyPolicy.js')
 
   const ignoreMissing = (error: { code?: number }) => {
     if (error.code !== NOT_FOUND) throw error
@@ -209,7 +210,8 @@ export const startLocalBackend = async () => {
   // ---------- friendships ----------
 
   // Snapshots carry no "before", so remember each status to see pending → accepted.
-  // The first snapshot only fills this in: acceptances while we were off go unannounced.
+  // The first snapshot fills this in, and announces acceptances from while we were off
+  // (recent ones only; the notice id names the acceptance, so none is announced twice).
   const statuses = new Map<string, string>()
   let connectionsPrimed = false
   const onConnections = (snap: QuerySnapshot) => {
@@ -221,6 +223,9 @@ export const startLocalBackend = async () => {
       else statuses.delete(id)
       void retrying(`friendship ${id}`, () => mirrorFriendshipOf(id, after))
       if (connectionsPrimed) void retrying(`accepted ${id}`, () => noticeOnAccept(id, before, after))
+      else if (after && acceptedWhileAway(after.status, after.updatedAt?.toMillis?.(), Date.now())) {
+        void retrying(`accepted while away ${id}`, () => noticeOnAccept(id, 'pending', after))
+      }
     })
     if (connectionsPrimed) return
     connectionsPrimed = true

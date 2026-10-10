@@ -37,3 +37,11 @@ export const pickMentioned = (text: string, requested: readonly string[], reader
 // A post's writer hears about a comment, unless they wrote it, can't read it, or are already pinged in it
 export const commentRecipient = (postAuthor: Reader | undefined, commenterUid: string, mentioned: readonly Mentioned[]) =>
   reachable(postAuthor) && postAuthor.uid !== commenterUid && !mentioned.some((m) => m.uid === postAuthor.uid) ? postAuthor.uid : null
+
+// Acceptances the local backend may have missed while it was off, still recent enough to be news.
+// Announcing one twice is impossible (the notice id names the acceptance), so this only bounds
+// how far back a restart looks: older ones would be surprising, not helpful.
+export const MISSED_ACCEPT_MS = 3 * 24 * 60 * 60 * 1000
+
+export const acceptedWhileAway = (status: unknown, acceptedAtMs: number | undefined, nowMs: number) =>
+  status === 'accepted' && acceptedAtMs !== undefined && acceptedAtMs <= nowMs && nowMs - acceptedAtMs <= MISSED_ACCEPT_MS

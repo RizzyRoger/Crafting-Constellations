@@ -95,6 +95,17 @@ beforeAll(async () => {
   const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':')
   connectFirestoreEmulator(db, host, Number(port))
   connectAuthEmulator(auth, `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}`, { disableWarnings: true })
+
+  // Accepted while the backend was off: one an hour ago (still news), one last month (too old)
+  const acceptedAgo = async (asker: string, answerer: string, ms: number) => {
+    const uids = [asker, answerer].sort()
+    await Promise.all([asker, answerer].map((uid) => adminDb.doc(`users/${uid}`).set({ penName: uid, avatarSeed: uid, pigment: 'graphite', pro: false, banned: false })))
+    const at = new Date(Date.now() - ms)
+    await adminDb.doc(`connections/${uids.join('_')}`).set({ uids, requester: asker, recipient: answerer, status: 'accepted', createdAt: at, updatedAt: at })
+  }
+  await acceptedAgo('away-asker', 'away-answerer', 60 * 60_000)
+  await acceptedAgo('old-asker', 'old-answerer', 30 * 24 * 60 * 60_000)
+
   // @ts-expect-error built JS from the functions package (npm run functions:build)
   const { startLocalBackend } = await import('../../functions/lib/local-backend.js')
   backend = await startLocalBackend()
@@ -247,6 +258,12 @@ describe('notifications', () => {
     expect(await field(path, 'status')).toBe('published')
     expect(await field(path, 'mentioned')).toEqual([{ uid: fern, penName: 'Bracken' }])
     expect(await notices(fern)).toEqual([expect.objectContaining({ type: 'mention', contentPath: path, actorUid: writer })])
+  })
+
+  it('catches up on a recent acceptance from while it was off, and leaves old ones be', async () => {
+    await eventually(async () => (await notices('away-asker')).length === 1, 'the missed acceptance')
+    expect((await notices('away-asker'))[0]).toMatchObject({ type: 'accepted', actorUid: 'away-answerer', seen: false })
+    expect(await notices('old-asker')).toEqual([])
   })
 
   it('tells the person who reached out, once, when their request is accepted', async () => {
