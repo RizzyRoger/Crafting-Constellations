@@ -51,8 +51,8 @@ const findPhone = (raw: string) =>
   PHONE.map((p) => raw.match(p)?.[0] ?? '').find((m) => m !== '' && !PHONE_ALLOWLIST.includes(m.replace(/\D/g, '')))
 
 export const moderate = (text: string, { context = 'public' }: { context?: Context } = {}): ModerationResult => {
-  const { raw, words, joined } = normalize(text)
-  const views = words === joined ? [words] : [words, joined]
+  const { raw, words, joined, unmarked } = normalize(text)
+  const views = [...new Set([words, joined, unmarked])]
   const matches: Match[] = []
 
   const slur = firstMatch([SLUR], views)
