@@ -114,6 +114,10 @@ const seed = async () => {
   // A report the leaver filed about the friend's post (the trigger queues it)
   await db.collection('reports').add({ reporterUid: leaver, contentPath: `${g}/posts/fp`, reason: 'other', details: 'test', createdAt: new Date() })
 
+  // The friend's notifications: one the leaver caused (a mention), one from someone else
+  await db.doc(`users/${friend}/notices/from-leaver`).set({ type: 'mention', contentPath: `${g}/messages/lm`, actorUid: leaver, seen: false, createdAt: new Date() })
+  await db.doc(`users/${friend}/notices/from-mod`).set({ type: 'comment', contentPath: `${g}/posts/fp/comments/x`, actorUid: mod, seen: false, createdAt: new Date() })
+
   // Posting-rate stamps (written by moderation)
   await db.doc(`rateLimits/${leaver}`).set({ stamps: [Date.now()], updatedAt: new Date() })
 
@@ -213,6 +217,8 @@ describe('deleteAccount', () => {
       queueDoc(`dms/${pair}/messages/m2`),
       `proApplications/${leaver}`,
       `rateLimits/${leaver}`,
+      // what they caused in other people's notifications
+      `users/${friend}/notices/from-leaver`,
     ]) {
       expect(await exists(path), path).toBe(false)
     }
@@ -222,7 +228,15 @@ describe('deleteAccount', () => {
     await expect(adminAuth.getUser(leaver)).rejects.toMatchObject({ code: 'auth/user-not-found' })
 
     // Kept: the friend, their post and group talk, the group; the report stays queued without the leaver's uid
-    for (const path of [`users/${friend}`, `penNames/staying finch ${n}`, `${g}/members/${friend}`, `${g}/posts/fp`, `${g}/messages/fm`, g]) {
+    for (const path of [
+      `users/${friend}`,
+      `users/${friend}/notices/from-mod`,
+      `penNames/staying finch ${n}`,
+      `${g}/members/${friend}`,
+      `${g}/posts/fp`,
+      `${g}/messages/fm`,
+      g,
+    ]) {
       expect(await exists(path), path).toBe(true)
     }
     expect(await field(queueDoc(`${g}/posts/fp`), 'reports.reporterUids')).toEqual([])

@@ -3,8 +3,9 @@
  * while the project can't run Cloud Functions. It only makes outgoing connections.
  * - Answers the calls the site writes to calls/{id} (site built with VITE_LOCAL_BACKEND=true)
  *   by running each callable's own handler.
- * - Watches Firestore for what the triggers would do: moderate pending writing,
- *   handle reports, mirror friendships, keep counters.
+ * - Watches Firestore for what the triggers would do: moderate pending writing
+ *   (which also pings people), handle reports, mirror friendships and tell people
+ *   their request was accepted, keep counters.
  * Everything here is safe to repeat, so a restart simply catches up.
  *
  *   npm --prefix functions run build
@@ -98,7 +99,7 @@ export const startLocalBackend = async () => {
   const functions = (await import('./index.js')) as unknown as Record<(typeof CALLABLES)[number], CallableFunction<unknown, unknown>>
   const { handleNewContent } = await import('./content.js')
   const { handleReport } = await import('./reports.js')
-  const { mirrorFriendshipOf } = await import('./friendships.js')
+  const { mirrorFriendshipOf, noticeOnAccept } = await import('./friendships.js')
 
   const ignoreMissing = (error: { code?: number }) => {
     if (error.code !== NOT_FOUND) throw error
@@ -207,11 +208,19 @@ export const startLocalBackend = async () => {
 
   // ---------- friendships ----------
 
+  // Snapshots carry no "before", so remember each status to see pending → accepted.
+  // The first snapshot only fills this in: acceptances while we were off go unannounced.
+  const statuses = new Map<string, string>()
   let connectionsPrimed = false
   const onConnections = (snap: QuerySnapshot) => {
     snap.docChanges().forEach((change) => {
+      const id = change.doc.id
       const after = change.type === 'removed' ? undefined : change.doc.data()
-      void retrying(`friendship ${change.doc.id}`, () => mirrorFriendshipOf(change.doc.id, after))
+      const before = statuses.get(id)
+      if (after) statuses.set(id, after.status)
+      else statuses.delete(id)
+      void retrying(`friendship ${id}`, () => mirrorFriendshipOf(id, after))
+      if (connectionsPrimed) void retrying(`accepted ${id}`, () => noticeOnAccept(id, before, after))
     })
     if (connectionsPrimed) return
     connectionsPrimed = true

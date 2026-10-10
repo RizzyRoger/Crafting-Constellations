@@ -79,6 +79,7 @@ const Rail = () => {
   const myGroups = groups.data.filter((g) => myGroupIds.has(g.id)).sort((a, b) => a.name.localeCompare(b.name))
   const myChats = [...chats.data].sort((a, b) => a.name.localeCompare(b.name))
   const incoming = connections.data.filter((c) => c.status === 'pending' && c.recipient === uid).length
+  const unread = notices.data.length + incoming
   const byId = useMemo(() => new Map(people.data.map((p) => [p.id, p])), [people.data])
 
   const needle = queryText.trim().toLowerCase()
@@ -93,6 +94,11 @@ const Rail = () => {
 
   return (
     <aside className="rail" aria-label="Index">
+      <NavLink to="/notifications" className="rail__notify" aria-label={unread > 0 ? `Notifications, ${unread} new` : 'Notifications'}>
+        Notifications
+        {unread > 0 && <span className="rail__count code">{unread}</span>}
+      </NavLink>
+
       <Disclosure label="Search for user" open={searchOpen} onToggle={setSearchOpen}>
         <input
           className="disc__search"
@@ -171,10 +177,7 @@ const Rail = () => {
         {profile && (
           <Link to="/me" className="rail__me">
             <Blot seed={profile.avatarSeed} pigment={profile.pigment} size={28} />
-            <span className="who__name">
-              {profile.penName}
-              {notices.data.length + incoming > 0 ? <span className="count code"> ({notices.data.length + incoming})</span> : null}
-            </span>
+            <span className="who__name">{profile.penName}</span>
           </Link>
         )}
         {!verified && (

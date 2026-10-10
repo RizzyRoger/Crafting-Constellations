@@ -1,12 +1,10 @@
 import { FieldValue } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
-import { db } from './app.js'
+import { db, pairIdOf } from './app.js'
 import { checkPenName } from './moderation/index.js'
 import { callable } from './options.js'
 
 export const MAX_CHAT_PEOPLE = 20
-
-const pairIdOf = (a: string, b: string) => [a, b].sort().join('_')
 
 // A small private chat among people the creator is already connected with.
 // Members are fixed here; each can leave on their own (see firestore.rules).

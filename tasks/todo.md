@@ -6,11 +6,13 @@ Plan: `/Users/darren/.claude/plans/i-want-you-to-quiet-stardust.md`
 
 - [x] 0. Synced with main (7099d22: private group chats)
 - [x] 1. Paper grain tiles without seams (filter region pinned to the tile). Mottle tile edge step: 32× the inside step before, ordinary noise after (81st–90th percentile of its own rows/columns)
-- [ ] 2. Notifications + @mentions
-  - [ ] shared `mentions.ts` (+ tests)
-  - [ ] server: `notify.ts` in `handleNewContent` and `approveContent`; accepted notices; purge; rules; index
-  - [ ] client: Composer autocomplete, `MentionText`, Notifications page, rail link, Me cleanup
-  - [ ] tests: unit, rules, local-backend e2e, deleteAccount e2e
+- [x] 2. Notifications + @mentions
+  - [x] shared `mentions.ts` (+ tests)
+  - [x] server: `notify.ts` in `handleNewContent` and `approveContent`; accepted notices (function + local backend); purge; rules; index
+  - [x] client: Composer autocomplete, `MentionText`, Notifications page, rail link, Me cleanup; seed gives `SEED_ME_UID` a mention
+  - [x] tests: unit 115, rules 48, local-backend e2e 10, deleteAccount e2e 5
+  - [x] browser (own emulators on other ports, two people): @ list by keyboard and pointer, highlight from the server, comment / mention / accepted notices, opening one marks it read, Mark all read, withdrawn → "No longer here", 375px no sideways scroll
+  - Found while checking: reading a withdrawn item's document (or a query pinned to its id) is refused, and the refused listen broke the Firestore client. Excerpts now ask for "published at this time" (`contentAt`).
 - [ ] 3. Draggable Friends chart (spring physics, your dot fixed)
 - [ ] 4. Verify: typecheck, unit, rules, e2e, build, browser (two people, 375px + desktop)
 

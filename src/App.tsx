@@ -17,6 +17,7 @@ import { Me } from './pages/Me'
 import { Messages } from './pages/Messages'
 import { NewChat } from './pages/NewChat'
 import { NotFound } from './pages/NotFound'
+import { Notifications } from './pages/Notifications'
 import { Onboarding } from './pages/Onboarding'
 import { PostPage } from './pages/Post'
 import { Professional } from './pages/Professional'
@@ -68,6 +69,7 @@ const routes: RouteObject[] = [
           { path: '/chats/new', element: <NewChat /> },
           { path: '/chats/:chatId', element: <Chat /> },
           { path: '/me', element: <Me /> },
+          { path: '/notifications', element: <Notifications /> },
           { path: '/professional', element: <Professional /> },
           { path: '/admin/claim', element: <AdminClaim /> },
           {

@@ -6,26 +6,29 @@ import { Composer } from '../components/Composer'
 import { ConfirmEmail } from '../components/ConfirmEmail'
 import { Item } from '../components/Item'
 import { LikeButton } from '../components/LikeButton'
+import { MentionText } from '../components/MentionText'
 import { PageHead } from '../components/PageHead'
 import { Quiet } from '../components/Quiet'
 import { Talk } from '../components/Talk'
 import { describeError } from '../lib/callables'
 import { db } from '../lib/firebase'
 import { useDocData, useLiveContent } from '../lib/live'
+import { useGroupPeople } from '../lib/people'
 import { joinGroup, leaveGroup } from '../lib/social'
-import type { Group as GroupDoc, Post } from '../lib/types'
+import type { Group as GroupDoc, Post, Profile } from '../lib/types'
 import { HEAD_DESCENDING } from '../wash/strokes'
 
 type Tab = 'talk' | 'posts'
 
-const Posts = ({ groupId, me, verified }: { groupId: string; me: string; verified: boolean }) => {
+const Posts = ({ groupId, me, verified, people }: { groupId: string; me: string; verified: boolean; people: Profile[] }) => {
   const posts = useLiveContent<Post>(`groups/${groupId}/posts`, me, { max: 40 })
 
-  const publish = async (body: string, title?: string) => {
+  const publish = async (body: string, title: string | undefined, mentions: string[]) => {
     await addDoc(collection(db, `groups/${groupId}/posts`), {
       authorUid: me,
       ...(title ? { title } : {}),
       body,
+      ...(mentions.length > 0 ? { mentions } : {}),
       status: 'pending',
       createdAt: serverTimestamp(),
     })
@@ -34,7 +37,7 @@ const Posts = ({ groupId, me, verified }: { groupId: string; me: string; verifie
   return (
     <div className="stack" style={{ gap: 28 }}>
       {verified ? (
-        <Composer expandable label="Make a post" withTitle rows={4} max={4000} submitLabel="Send" onSubmit={publish} />
+        <Composer expandable label="Make a post" withTitle rows={4} max={4000} submitLabel="Send" people={people} onSubmit={publish} />
       ) : (
         <ConfirmEmail />
       )}
@@ -66,7 +69,7 @@ const Posts = ({ groupId, me, verified }: { groupId: string; me: string; verifie
                     {p.status === 'published' ? <Link to={`/groups/${groupId}/posts/${p.id}`}>{p.title}</Link> : p.title}
                   </h3>
                 )}
-                <p className="voice">{p.body.length > 600 ? `${p.body.slice(0, 600)}…` : p.body}</p>
+                <MentionText text={p.body.length > 600 ? `${p.body.slice(0, 600)}…` : p.body} mentioned={p.mentioned} me={me} />
               </Item>
             </li>
           ))}
@@ -83,6 +86,7 @@ export const Group = () => {
   const tab: Tab = params.get('tab') === 'posts' ? 'posts' : 'talk'
   const group = useDocData<GroupDoc>(`groups/${groupId}`)
   const membership = useDocData<{ uid: string }>(`groups/${groupId}/members/${uid}`)
+  const people = useGroupPeople(groupId, uid)
   const [leaving, setLeaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -153,9 +157,9 @@ export const Group = () => {
             </button>
           </div>
           {tab === 'talk' ? (
-            <Talk path={`groups/${groupId}/messages`} me={uid} verified={claims.emailVerified} />
+            <Talk path={`groups/${groupId}/messages`} me={uid} verified={claims.emailVerified} people={people} />
           ) : (
-            <Posts groupId={groupId} me={uid} verified={claims.emailVerified} />
+            <Posts groupId={groupId} me={uid} verified={claims.emailVerified} people={people} />
           )}
         </>
       ) : (

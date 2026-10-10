@@ -18,6 +18,7 @@ import {
   serverTimestamp,
   setDoc,
   terminate,
+  updateDoc,
   type DocumentData,
 } from 'firebase/firestore'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -77,6 +78,13 @@ const person = async (penName?: string, email?: string) => {
   await signInWithEmailAndPassword(auth, email ?? `${uid}@example.test`, PASSWORD)
   return uid
 }
+
+const signInAs = async (uid: string) => {
+  await signOut(auth)
+  await signInWithEmailAndPassword(auth, `${uid}@example.test`, PASSWORD)
+}
+
+const notices = async (uid: string) => (await adminDb.collection(`users/${uid}/notices`).get()).docs.map((d) => ({ id: d.id, ...d.data() }))
 
 let backend: { stop: () => void }
 
@@ -159,5 +167,111 @@ describe('local backend', () => {
       async () => (await field(`${g}/posts/p1`, 'likeCount')) === 1 && (await field(`${g}/posts/p1`, 'commentCount')) === 1,
       'the like and comment counts',
     )
+  })
+})
+
+describe('notifications', () => {
+  const group = async (uids: string[]) => {
+    const g = `groups/notify-${++runs}`
+    await adminDb.doc(g).set({ name: 'Evening sheet', memberCount: 0 })
+    await Promise.all(uids.map((uid) => adminDb.doc(`${g}/members/${uid}`).set({ uid, joinedAt: new Date() })))
+    return g
+  }
+  const published = (path: string) => eventually(async () => (await field(path, 'status')) === 'published', `${path} to publish`)
+
+  it('pings people picked with @ who can read it, and tells the post’s writer about a comment', async () => {
+    const poster = await person('Willow')
+    const fern = await person('Fern')
+    const outsider = await person('Outsider')
+    const writer = await person('Writer')
+    const g = await group([poster, fern, writer])
+    await adminDb.doc(`${g}/posts/p1`).set({ authorUid: poster, body: 'A long day.', status: 'published', createdAt: new Date() })
+
+    const path = `${g}/posts/p1/comments/c1`
+    await setDoc(doc(db, path), {
+      authorUid: writer,
+      text: '@fern and @Outsider, thinking of you all',
+      mentions: [fern, outsider, writer],
+      status: 'pending',
+      createdAt: serverTimestamp(),
+    })
+    await published(path)
+
+    expect(await field(path, 'mentioned')).toEqual([{ uid: fern, penName: 'Fern' }])
+    expect(await notices(fern)).toEqual([
+      expect.objectContaining({ id: `mention~${path.replaceAll('/', '~')}`, type: 'mention', contentPath: path, actorUid: writer, seen: false }),
+    ])
+    expect((await notices(fern))[0]).toMatchObject({ actor: { penName: 'Writer' }, contentAt: await field(path, 'createdAt') })
+    expect(await notices(poster)).toEqual([expect.objectContaining({ type: 'comment', contentPath: path, actorUid: writer })])
+    expect(await notices(outsider)).toEqual([])
+    expect(await notices(writer)).toEqual([])
+  })
+
+  it('never pings someone who blocked the writer, in group talk or anywhere', async () => {
+    const blocker = await person('Hedge')
+    const friend = await person('Lantern')
+    const writer = await person('Talker')
+    const g = await group([blocker, friend, writer])
+    await adminDb.doc(`connections/${[blocker, writer].sort().join('_')}`).set({
+      uids: [blocker, writer].sort(),
+      requester: writer,
+      recipient: blocker,
+      status: 'blocked',
+      blockedBy: blocker,
+    })
+
+    const path = `${g}/messages/m1`
+    await setDoc(doc(db, path), { authorUid: writer, text: '@Hedge @Lantern tea later?', mentions: [blocker, friend], status: 'pending', createdAt: serverTimestamp() })
+    await published(path)
+
+    expect(await field(path, 'mentioned')).toEqual([{ uid: friend, penName: 'Lantern' }])
+    expect(await notices(friend)).toHaveLength(1)
+    expect(await notices(blocker)).toEqual([])
+  })
+
+  it('pings nobody while writing is held, then pings once a moderator approves it', async () => {
+    const fern = await person('Bracken')
+    const writer = await person('Sharp Tongue')
+    const g = await group([fern, writer])
+
+    const path = `${g}/posts/p1`
+    await setDoc(doc(db, path), { authorUid: writer, body: '@Bracken you are such a loser', mentions: [fern], status: 'pending', createdAt: serverTimestamp() })
+    await eventually(async () => (await field(path, 'status')) === 'held', 'the post to be held')
+    expect(await notices(fern)).toEqual([])
+    expect(await field(path, 'mentioned')).toBeUndefined()
+
+    const moderator = await person('Night Owl')
+    await adminAuth.setCustomUserClaims(moderator, { admin: true })
+    expect(await callViaQueue('approveContent', { queueId: path.replaceAll('/', '~') })).toMatchObject({ state: 'done' })
+
+    expect(await field(path, 'status')).toBe('published')
+    expect(await field(path, 'mentioned')).toEqual([{ uid: fern, penName: 'Bracken' }])
+    expect(await notices(fern)).toEqual([expect.objectContaining({ type: 'mention', contentPath: path, actorUid: writer })])
+  })
+
+  it('tells the person who reached out, once, when their request is accepted', async () => {
+    const asker = await person('Asker')
+    const answerer = await person('Answerer')
+    const pairId = [asker, answerer].sort().join('_')
+
+    await signInAs(asker)
+    await setDoc(doc(db, `connections/${pairId}`), {
+      uids: [asker, answerer].sort(),
+      requester: asker,
+      recipient: answerer,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    // Let the backend see the request as pending before it is answered
+    await sleep(1500)
+    expect(await notices(asker)).toEqual([])
+
+    await signInAs(answerer)
+    await updateDoc(doc(db, `connections/${pairId}`), { status: 'accepted', updatedAt: serverTimestamp() })
+    await eventually(async () => (await notices(asker)).length === 1, 'the accepted notice')
+
+    expect((await notices(asker))[0]).toMatchObject({ type: 'accepted', actorUid: answerer, actor: { penName: 'Answerer' }, seen: false })
+    expect(await notices(answerer)).toEqual([])
   })
 })

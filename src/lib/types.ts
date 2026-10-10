@@ -32,6 +32,8 @@ export interface Content {
   author?: AuthorSnapshot
   heldReason?: 'crisis' | 'review'
   crisis?: boolean
+  // People pinged with @, checked and attached by functions on publish
+  mentioned?: { uid: string; penName: string }[]
 }
 
 export interface Message extends Content {
@@ -90,9 +92,14 @@ export interface Chat {
 
 export interface Notice {
   id: string
-  type: 'crisis' | 'held' | 'removed' | 'proApproved' | 'proDenied'
+  type: 'crisis' | 'held' | 'removed' | 'proApproved' | 'proDenied' | 'mention' | 'comment' | 'accepted'
   contentPath?: string
+  // When that writing was made: how the page finds it again (mention / comment)
+  contentAt?: Timestamp
   note?: string
+  // Who pinged, commented or accepted (mention / comment / accepted)
+  actorUid?: string
+  actor?: AuthorSnapshot
   createdAt: Timestamp | null
   seen: boolean
 }

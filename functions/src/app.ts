@@ -37,3 +37,15 @@ export const queueIdFor = (path: string) => path.replaceAll('/', '~')
 
 export const textOf = (data: FirebaseFirestore.DocumentData | undefined) =>
   [data?.title, data?.body ?? data?.text].filter((v): v is string => typeof v === 'string').join('\n')
+
+// Connection / private-thread id for two people: sorted uids joined by _
+export const pairIdOf = (a: string, b: string) => [a, b].sort().join('_')
+
+// The name and mark shown on someone's writing, as of now (attached by functions only)
+export const snapshotOf = (uid: string, profile: FirebaseFirestore.DocumentData | undefined) => ({
+  penName: profile?.penName ?? 'Someone',
+  avatarSeed: profile?.avatarSeed ?? uid,
+  pigment: profile?.pigment ?? 'paynesBlue',
+  pro: profile?.pro === true,
+  ...(profile?.synthetic ? { synthetic: true } : {}),
+})

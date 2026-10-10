@@ -309,6 +309,65 @@ describe('private group chats', () => {
   })
 })
 
+describe('mentions and notifications', () => {
+  const CHAT = 'chats/c1'
+  const eleven = Array.from({ length: 11 }, (_, i) => `u${i}`)
+
+  beforeEach(() =>
+    seed(async (db) => {
+      await setDoc(doc(db, CHAT), { name: 'Tuesday soup', uids: ['alice', 'bob'], createdBy: 'alice' })
+      await setDoc(doc(db, 'connections/alice_bob'), { uids: ['alice', 'bob'], requester: 'alice', recipient: 'bob', status: 'accepted' })
+      await setDoc(doc(db, 'users/bob/notices/n1'), { type: 'mention', contentPath: `${GROUP}/posts/pub`, actorUid: 'alice', seen: false, createdAt: new Date() })
+    }),
+  )
+
+  it('new posts, comments, group talk and chat notes may carry up to ten picked people', async () => {
+    await assertSucceeds(setDoc(doc(collection(alice(), `${GROUP}/posts`)), pending('alice', { body: 'hi @bob', mentions: ['bob'] })))
+    await assertSucceeds(setDoc(doc(collection(alice(), `${GROUP}/posts/pub/comments`)), pending('alice', { text: 'hi @bob', mentions: ['bob'] })))
+    await assertSucceeds(setDoc(doc(collection(alice(), `${GROUP}/messages`)), pending('alice', { text: 'hi @bob', mentions: ['bob'] })))
+    await assertSucceeds(setDoc(doc(collection(alice(), `${CHAT}/messages`)), pending('alice', { text: 'hi @bob', mentions: ['bob'] })))
+    await assertSucceeds(setDoc(doc(collection(alice(), `${GROUP}/messages`)), pending('alice', { text: 'hi', mentions: eleven.slice(0, 10) })))
+  })
+
+  it('refuses more than ten, an empty or non-list value, and mentions in one-to-one notes', async () => {
+    const talk = (db: Firestore) => doc(collection(db, `${GROUP}/messages`))
+    await assertFails(setDoc(talk(alice()), pending('alice', { text: 'hi', mentions: eleven })))
+    await assertFails(setDoc(talk(alice()), pending('alice', { text: 'hi', mentions: [] })))
+    await assertFails(setDoc(talk(alice()), pending('alice', { text: 'hi', mentions: 'bob' })))
+    await assertFails(setDoc(doc(collection(alice(), 'dms/alice_bob/messages')), pending('alice', { text: 'hi', mentions: ['bob'] })))
+  })
+
+  it('clients never attach the checked list of who was pinged', async () => {
+    await assertFails(
+      setDoc(doc(collection(alice(), `${GROUP}/messages`)), pending('alice', { text: 'hi @bob', mentioned: [{ uid: 'bob', penName: 'bob' }] })),
+    )
+  })
+
+  it('a notification can always ask for its words as published at their time, even once they are withdrawn', async () => {
+    const at = new Date('2026-10-10T12:00:00Z')
+    await seed((db) => setDoc(doc(db, `${GROUP}/messages/gone`), { authorUid: 'alice', text: '@bob', status: 'withdrawn', createdAt: at }))
+    const published = (db: Firestore) =>
+      getDocs(query(collection(db, `${GROUP}/messages`), where('status', '==', 'published'), where('createdAt', '==', at)))
+    await assertSucceeds(published(bob()))
+    // Reading the document is refused, and so is a query pinned to its id: the page opens neither
+    await assertFails(getDoc(doc(bob(), `${GROUP}/messages/gone`)))
+  })
+
+  it('only the owner reads their notifications, and can only mark them read', async () => {
+    await assertSucceeds(getDoc(doc(bob(), 'users/bob/notices/n1')))
+    await assertFails(getDoc(doc(alice(), 'users/bob/notices/n1')))
+    await assertFails(updateDoc(doc(bob(), 'users/bob/notices/n1'), { seen: false, type: 'comment' }))
+    await assertSucceeds(updateDoc(doc(bob(), 'users/bob/notices/n1'), { seen: true }))
+  })
+
+  it('nobody can write a notification into someone’s list, or remove one', async () => {
+    const forged = { type: 'mention', contentPath: `${GROUP}/posts/pub`, actorUid: 'alice', seen: false, createdAt: serverTimestamp() }
+    await assertFails(setDoc(doc(alice(), 'users/bob/notices/n2'), forged))
+    await assertFails(setDoc(doc(bob(), 'users/bob/notices/n2'), forged))
+    await assertFails(deleteDoc(doc(bob(), 'users/bob/notices/n1')))
+  })
+})
+
 describe('reports, queue, and bans', () => {
   it('anyone signed in can report a valid path; only admins read reports', async () => {
     const report = { reporterUid: 'alice', contentPath: `${GROUP}/posts/pub`, reason: 'harassment', createdAt: serverTimestamp() }

@@ -1,8 +1,9 @@
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore'
 import { onDocumentCreated } from 'firebase-functions/v2/firestore'
-import { db, kindOf, queueIdFor, textOf, type ContentKind } from './app.js'
+import { db, kindOf, queueIdFor, snapshotOf, textOf, type ContentKind } from './app.js'
 import { applyFlood } from './moderation/flood.js'
 import { moderate } from './moderation/index.js'
+import { applyNotices, NO_NOTICES, planNotices } from './notify.js'
 
 // Every new piece of writing arrives `pending`. This decides, once:
 // - clean                 → published, with the author's name + licensed mark attached
@@ -10,6 +11,7 @@ import { moderate } from './moderation/index.js'
 // - crisis elsewhere      → held for a person to read; the author sees resources
 // - anything else flagged → held, queued for review
 // - author banned or gone → removed (gone: deleted their account while this was in flight)
+// Whatever is delivered pings the people picked with @ and, for a comment, the post's writer.
 export const handleNewContent = async (ref: DocumentReference) => {
   const kind = kindOf(ref.path)
   if (!kind || kind === 'profile') return
@@ -34,16 +36,7 @@ export const handleNewContent = async (ref: DocumentReference) => {
       return
     }
 
-    tx.set(rateRef, { stamps, updatedAt: now })
-
-    const profile = userSnap.data()
-    const author = {
-      penName: profile?.penName ?? 'Someone',
-      avatarSeed: profile?.avatarSeed ?? authorUid,
-      pigment: profile?.pigment ?? 'paynesBlue',
-      pro: profile?.pro === true,
-      ...(profile?.synthetic ? { synthetic: true } : {}),
-    }
+    const author = snapshotOf(authorUid, userSnap.data())
 
     const text = textOf(data)
     const privateThread = kind === 'dm' || kind === 'chatMessage'
@@ -58,8 +51,19 @@ export const handleNewContent = async (ref: DocumentReference) => {
     const pairId = kind === 'dm' ? segments[1] : undefined
     const chatId = kind === 'chatMessage' ? segments[1] : undefined
 
+    // Its reads go before any write (a transaction rule), so the stamps are set after
+    const notices = deliver ? await planNotices(tx, ref.path, data, author) : NO_NOTICES
+    tx.set(rateRef, { stamps, updatedAt: now })
+
     if (deliver) {
-      tx.update(ref, { status: 'published', publishedAt: now, author, ...(verdict.crisis ? { crisis: true } : {}) })
+      tx.update(ref, {
+        status: 'published',
+        publishedAt: now,
+        author,
+        ...(verdict.crisis ? { crisis: true } : {}),
+        ...(notices.mentioned.length > 0 ? { mentioned: notices.mentioned } : {}),
+      })
+      applyNotices(tx, notices)
       if (pairId) {
         tx.set(db.doc(`dms/${pairId}`), { uids: pairId.split('_'), lastMessageAt: now, lastAuthorUid: authorUid }, { merge: true })
       }
