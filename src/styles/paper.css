@@ -84,7 +84,7 @@ body::after {
   pointer-events: none;
 }
 
-/* Caption plate: name in a ruled box, pigment line on a longer ruled field */
+/* Caption plate: the name, lettered in a ruled box */
 .plate {
   display: grid;
   justify-items: start;
@@ -94,23 +94,6 @@ body::after {
   font-size: var(--name-size);
   line-height: 1.15;
   margin: 0;
-}
-
-.plate__line {
-  position: relative;
-  justify-self: stretch;
-  padding: 10px 12px 9px;
-  font-size: 15px;
-}
-
-.plate__line::before {
-  content: '';
-  position: absolute;
-  inset: -1px 0 0 0;
-  border-left: 1px solid var(--pencil);
-  border-bottom: 1px solid var(--pencil);
-  filter: url(#pencil);
-  pointer-events: none;
 }
 
 /* Swatch bar: CSS gradient fallback; wash.js paints a canvas over it.
