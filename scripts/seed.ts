@@ -92,6 +92,19 @@ const CONSTELLATIONS = [
       { id: 'grief-slowly', name: 'Grief, slowly', description: 'For after. No timeline.', members: ['synth02', 'synth10', 'synth06'] },
     ],
   },
+  {
+    id: 'personal',
+    name: 'Personal',
+    description: 'A shared room for a note of your own.',
+    groups: [
+      {
+        id: 'daily-check-in',
+        name: 'Daily check-in',
+        description: 'One note a day: how you are, what is on your mind, and a step you might take.',
+        members: PEOPLE.map((p) => p.uid),
+      },
+    ],
+  },
 ]
 
 const CONNECTIONS: [string, string, 'accepted' | 'pending'][] = [
@@ -213,7 +226,8 @@ const seedGroups = async (meUid?: string) => {
         createdAt: minutesAgo(60 * 24 * 60),
         synthetic: true,
       })
-      const members = meUid && ['late-night-caregivers', 'kitchen-table'].includes(g.id) ? [...g.members, meUid] : g.members
+      const withMe = meUid && (g.id === 'daily-check-in' || ['late-night-caregivers', 'kitchen-table'].includes(g.id))
+      const members = withMe ? [...g.members, meUid] : g.members
       for (const uid of members) {
         await db.doc(`groups/${g.id}/members/${uid}`).set({ uid, joinedAt: minutesAgo(60 * 24 * 20) })
       }

@@ -573,6 +573,15 @@ p {
   max-width: 480px;
 }
 
+.checkin .field label {
+  font-family: var(--font-pencil);
+  font-weight: 300;
+  font-size: 18px;
+  letter-spacing: 0;
+  line-height: 1.35;
+  color: var(--ink-deep);
+}
+
 .field input,
 .field select,
 .field textarea {

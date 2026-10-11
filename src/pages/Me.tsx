@@ -2,6 +2,7 @@ import { collection, query, where } from 'firebase/firestore'
 import { Link } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { useSignOut } from '../auth/useSignOut'
+import { CheckIn } from '../components/CheckIn'
 import { PageHead } from '../components/PageHead'
 import { ProfileForm } from '../components/ProfileForm'
 import { Who } from '../components/Who'
@@ -45,6 +46,8 @@ export const Me = () => {
         }
         seed={33}
       />
+
+      <CheckIn />
 
       {(incoming.length > 0 || outgoing.length > 0 || friends.length > 0 || blocked.length > 0) && (
         <section className="section" aria-labelledby="people">

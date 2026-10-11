@@ -1,11 +1,14 @@
 import { collection, collectionGroup, documentId, endAt, limit, orderBy, query, startAt, where, type Timestamp } from 'firebase/firestore'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useSignOut } from '../auth/useSignOut'
+import { CheckIn } from './CheckIn'
+import { CHECKIN_GROUP } from '../lib/checkin'
 import { db } from '../lib/firebase'
-import { useQueryData } from '../lib/live'
+import { useDocData, useQueryData } from '../lib/live'
 import { otherInPair } from '../lib/pair'
+import { joinGroup } from '../lib/social'
 import type { Chat, Connection, Group, Membership, Notice, Profile } from '../lib/types'
 import { Blot } from '../wash/Blot'
 
@@ -204,11 +207,40 @@ const Rail = () => {
   )
 }
 
-export const Shell = ({ children }: { children: ReactNode }) => (
-  <div className="shell">
-    <Rail />
-    <main className="shell__main" id="main">
-      {children}
-    </main>
-  </div>
-)
+// Everyone belongs to Daily check-in. Leaving lasts only until the next visit.
+const JoinCheckIn = () => {
+  const { user, profile } = useAuth()
+  const uid = user?.uid ?? null
+  const group = useDocData<{ name: string }>(uid && profile ? `groups/${CHECKIN_GROUP}` : null)
+  const membership = useDocData<{ uid: string }>(uid && profile ? `groups/${CHECKIN_GROUP}/members/${uid}` : null)
+  const tried = useRef(false)
+
+  useEffect(() => {
+    if (!uid || !profile || tried.current) return
+    if (group.loading || membership.loading || membership.pending) return
+    if (!group.data || membership.data) return
+    tried.current = true
+    void joinGroup(CHECKIN_GROUP, uid).catch(() => {
+      tried.current = false
+    })
+  }, [uid, profile, group.loading, group.data, membership.loading, membership.data, membership.pending])
+
+  return null
+}
+
+export const Shell = ({ children }: { children: ReactNode }) => {
+  const location = useLocation()
+  const [later, setLater] = useState(false)
+  const onMe = location.pathname === '/me'
+
+  return (
+    <div className="shell">
+      <Rail />
+      <main className="shell__main" id="main">
+        <JoinCheckIn />
+        {!later && !onMe && <CheckIn prompt onLater={() => setLater(true)} />}
+        {children}
+      </main>
+    </div>
+  )
+}
