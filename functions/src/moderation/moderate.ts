@@ -12,9 +12,11 @@ import {
   SELF_HARM,
   SERVICE_PHONE,
   SLUR,
+  TOLL_FREE_PHONE,
+  TRUNK_ZERO,
   type Category,
 } from './lexicon.js'
-import { normalize } from './normalize.js'
+import { normalize, readAsLatin, type Normalized } from './normalize.js'
 
 export type Context = 'public' | 'private'
 
@@ -54,24 +56,41 @@ const firstMatch = (patterns: RegExp[], texts: string[]) =>
 // and an @ inside a link is not read as an email ("https://nhs.uk@evil.com")
 const LINK_OR_EMAIL = new RegExp(`(${EMAIL.source})|${LINK.source}`, 'gu')
 
-const findLinks = (raw: string) => [...raw.matchAll(LINK_OR_EMAIL)].filter((m) => !m[1]).map((m) => m[0])
+// Punctuation after a link ends the sentence, not the host: "I called
+// https://www.samaritans.org, they were kind", "www.nhs.uk's advice",
+// "«https://www.nhs.uk»"
+const LINK_END = /(?:'s|[.,;:!?'"”*\]}|»])+$/u
+
+const findLinks = (raw: string) =>
+  [...raw.matchAll(LINK_OR_EMAIL)].filter((m) => !m[1]).map((m) => m[0].replace(LINK_END, ''))
 
 const isPersonalPhone = (match: string) => {
   const digits = match.replace(/\D/g, '')
-  if (PHONE_ALLOWLIST.includes(digits)) return false
+  if (PHONE_ALLOWLIST.includes(digits) || TOLL_FREE_PHONE.test(digits)) return false
+  // A UK support line written for callers abroad: +44 808 808 0000 is 0808 808 0000
+  if (match.startsWith('+44') && SERVICE_PHONE.test(digits.replace(/^440?/, '0'))) return false
   return !digits.startsWith('0') || (digits.length >= 10 && digits.length <= 11 && !SERVICE_PHONE.test(digits))
 }
 
-const findPhone = (raw: string) => PHONE.flatMap((p) => raw.match(p) ?? []).find(isPersonalPhone)
+const findPhone = (raw: string) => {
+  const dialled = raw.replace(TRUNK_ZERO, '$1 ')
+  return PHONE.flatMap((p) => dialled.match(p) ?? []).find(isPersonalPhone)
+}
+
+const lettersOf = (n: Normalized) => [n.words, n.joined, n.unmarked, n.folded, n.squeezed, n.clauses]
 
 export const moderate = (text: string, { context = 'public' }: { context?: Context } = {}): ModerationResult => {
-  const { raw, words, joined, unmarked, folded, leet, squeezed, clauses } = normalize(text)
-  const views = [...new Set([words, joined, unmarked, folded, squeezed, clauses])]
+  const normal = normalize(text)
+  const { raw, digits, words } = normal
+  // The word lists also read lookalike letters as the Latin ones they pass
+  // for (a Cyrillic і in "kіll"); links, emails and numbers don't
+  const latin = normalize(readAsLatin(text))
+  const views = [...new Set([...lettersOf(normal), ...lettersOf(latin)])]
   const matches: Match[] = []
 
   // Only slurs read a final ! as an "i": elsewhere it would glue onto an
   // everyday word and hide what makes it everyday ("on holiday!")
-  const slur = firstMatch([SLUR], [...views, leet])
+  const slur = firstMatch([SLUR], [...new Set([...views, normal.leet, latin.leet])])
   if (slur) matches.push({ category: 'slur', term: slur })
 
   const harassment = firstMatch(HARASSMENT, views)
@@ -89,7 +108,8 @@ export const moderate = (text: string, { context = 'public' }: { context?: Conte
   if (flood) matches.push({ category: 'spam', term: flood.slice(0, 24) })
 
   if (context === 'public') {
-    const contact = raw.match(EMAIL)?.[0] ?? findPhone(raw)
+    // In any script's digits, as Arabic, Persian or Hindi keyboards type them
+    const contact = digits.match(EMAIL)?.[0] ?? findPhone(digits)
     if (contact) matches.push({ category: 'personalInfo', term: contact })
   }
 

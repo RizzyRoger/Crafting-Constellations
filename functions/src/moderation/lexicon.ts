@@ -2,7 +2,7 @@
 // (see normalize.ts): lowercase, no apostrophes, leetspeak folded.
 // Bump LEXICON_VERSION whenever a list changes; it is stored on queue items.
 
-export const LEXICON_VERSION = 'lex-2026-10-12'
+export const LEXICON_VERSION = 'lex-2026-10-23'
 
 export type Category = 'slur' | 'harassment' | 'selfHarm' | 'spam' | 'personalInfo'
 
@@ -33,6 +33,31 @@ const GENTLY =
   'peacefully|quietly|calmly|comfortably|painlessly|gently|at home|in peace|with dignity|' +
   'without (?:pain|suffering)|in (?:his|her|their) sleep|surrounded by'
 
+// Cancer as a wish, not the care that comes with it: "you deserve cancer
+// support too", "I hope he gets cancer treatment soon", "cancer-free". Only a
+// space, as the clauses view puts "cancer. Support …" on two lines.
+const CANCER_HELP =
+  'care|support|treatments?|therapy|drugs?|meds|medication|nurses?|doctors?|specialists?|services?|research|' +
+  'charity|charities|centres?|centers?|clinics?|team|ward|unit|screening|scans?|tests?|checks?|trials?|help|' +
+  'advice|info|information|counsell?ing|grants?|benefits|funding|insurance|leave|free|clear'
+const CANCER = `cancer\\b(?! (?:${CANCER_HELP})\\b)`
+
+// What nobody wants for you, said kindly: "nobody wants you to go through
+// this alone", "… to have to face this", "… to feel like a burden". Anything
+// else nobody wants you to do or feel ("to come back", "to feel welcome", "to
+// think you matter") is still abuse.
+const SPARED =
+  'to (?:have to )?(?:feel(?! (?:welcome|wanted|loved|safe|happy|better|at home|included)\\b)|go through|suffer|' +
+  'struggle|worry|cope|face|carry|hurt|give up|blame|apologi[sz]e|push|deal with|leave|do (?:this|it) alone|' +
+  'think (?:youre|you are) (?:a burden|alone|to blame|on your own)|' +
+  'be (?:alone|on your own|lonely|scared|afraid|sad|ashamed|sorry|in pain))'
+// "Nobody loves you like your mum does", "… more than I do", "… any less for
+// crying" says someone does. Only after likes or loves: "nobody wants you
+// like …" is not a comparison.
+const LOVED_AS =
+  'like (?:a|an|my|our|his|her|their|your|i|we|he|she|they|family|mum|mom|mama|mummy|mommy|dad|daddy)|' +
+  'more than|as much as(?! you think)|any less'
+
 // One word may sit between "you" and an insult ("you stupid idiot"), but not
 // one that turns it round: "you are not worthless", "when you feel worthless",
 // "are you a control freak like me?"
@@ -46,15 +71,20 @@ export const HARASSMENT: RegExp[] = [
   /\bkys\b/u,
   /\b(?:you|u) should (?:just )?(?:die|be dead)\b/u,
   /\bgo die\b/u,
-  /\bhope (?:you|u) (?:die|dies|get cancer|gets cancer|suffer|suffers)\b/u,
-  new RegExp(`\\bhope (?:she|he|they) (?:gets? cancer|suffers?|dies?\\b(?!\\s(?:${GENTLY})\\b))\\b`, 'u'),
-  /\b(?:you|u) deserves? (?:to die|to suffer|cancer)\b/u,
-  new RegExp(`\\b(?:she|he|they) deserves? (?:cancer|to suffer|to die\\b(?!\\s(?:${GENTLY})\\b))\\b`, 'u'),
-  /\bnobody (?:wants|likes|loves) (?:you|u)\b/u,
+  new RegExp(`\\bhope (?:you|u) (?:die|dies|gets? ${CANCER}|suffer|suffers)\\b`, 'u'),
+  new RegExp(`\\bhope (?:she|he|they) (?:gets? ${CANCER}|suffers?|dies?\\b(?!\\s(?:${GENTLY})\\b))\\b`, 'u'),
+  new RegExp(`\\b(?:you|u) deserves? (?:to die|to suffer|${CANCER})\\b`, 'u'),
+  new RegExp(`\\b(?:she|he|they) deserves? (?:${CANCER}|to suffer|to die\\b(?!\\s(?:${GENTLY})\\b))\\b`, 'u'),
+  new RegExp(`\\bnobody wants (?:you|u)\\b(?! (?:${SPARED})\\b)`, 'u'),
+  new RegExp(`\\bnobody (?:likes|loves) (?:you|u)\\b(?! (?:${SPARED}|${LOVED_AS})\\b)`, 'u'),
   /\bfuck (?:you|u|off)\b/u,
+  // "You can bitch and moan here", "if you freak out": the verbs, not the
+  // insults. After "a" or "such" they are the insults, whatever follows.
   new RegExp(
     `\\b(?:you|u|youre|ur) (?:are |r )?(?:such |an? )?(?:(?!(?:${NOT_AN_INSULT})\\b)\\w+ )?` +
-      '(?:idiot|moron|loser|bitch|freak|pathetic|worthless|disgusting|piece of shit)\\b',
+      '(?:idiot|moron|loser|(?<=\\b(?:an?|such) (?:\\w+ )?)(?:bitch|freak)|' +
+      'bitch(?! (?:and (?:moan|whine|complain|vent)|about)\\b)|freak(?! out\\b)|' +
+      'pathetic|worthless|disgusting|piece of shit)\\b',
     'u',
   ),
   /\b(?:shut up|stfu) (?:and die|bitch)\b/u,
@@ -73,20 +103,56 @@ const FAMILY =
 const OUTING =
   'holidays?|vacations?|trips?|walks?|rides?|dates?|tours?|cruises?|leave|chemo|treatment|about|' +
   '(?:mon|tues|wednes|thurs|fri|satur|sun)days?|weekends?'
+// Day names as people shorten them: "can't go on Tues". "Sat" is also
+// sitting: "sat here alone", "sat crying", "sat quietly", "sat numb", "sat
+// the whole night" are how it feels. "Sat morning" and "Sat early" are the day.
+const SITTING =
+  'here|there|alone|and|in|on|at|by|with|next|beside|around|about|up|down|outside|inside|all|every|for|like|' +
+  'still|numb|the (?:whole|entire)|(?!(?:morn|even)ing\\b)\\w+ing|(?!(?:early|only|july)\\b)\\w+ly'
+const SHORT_DAY = `mon|tues?|weds?|thu(?:rs?)?|fri|sun|sat(?! (?:${SITTING})\\b)`
+// Other things to go on: "planes", "school trips", "Facebook"
+const GO_ON = 'planes?|flights?|trains?|buses|boats?|ferry|ferries|school trips?|facebook|instagram|social media'
+// Something to be put on: "can't go on morphine yet". A verb or an "I" after
+// it starts a new sentence ("… morphine isn't helping", "… its too much"),
+// and "like this", "anymore", "much longer", "forever" or "for the rest of my
+// life" is how it feels. "… the rest of his life" is still a plan for him.
+const TREATMENT = 'morphine|steroids|oxygen|dialysis|radiotherapy|immunotherapy|hormone therapy'
+const REST_OF_LIFE = 'the rest of (?:my|our) li(?:fe|ves)'
+const NEW_SENTENCE =
+  'i|im|ive|id|its|thats|is|isnt|are|arent|was|wasnt|were|werent|has|hasnt|have|havent|does|doesnt|did|didnt|' +
+  'will|wont|would|wouldnt|can|cant|could|couldnt|makes?|keeps?|feels?|hurts?|takes?|aint'
+const PLAN =
+  `${DETERMINER}|this|${OUTING}|${SHORT_DAY}|${GO_ON}|any (?:${OUTING}|${GO_ON})|` +
+  `(?:${TREATMENT})(?! (?:${NEW_SENTENCE}|like|(?:any|no) ?more|(?:much |any |no )?longer|for ?ever|` +
+  `(?:for )?${REST_OF_LIFE})\\b)`
 // "Going in" is going in to a ward or to work ("in and out of hospital", "in
 // every day"); "in this pain" and "into another day" or "into every day" are
-// how it feels
+// how it feels. Going "for" is only to an appointment: "for much longer" and
+// "for nothing" are how it feels.
+const APPOINTMENT = 'scans?|tests?|bloods?|blood tests?|appointments?|check ?ups?|chemo|treatment|radiotherapy|dialysis'
 const DIRECTION =
   'to|back|out|in (?:and|to|for|every)|' +
   'into(?! (?:another|tomorrow|(?:each|every|a new|the next) day|the (?:night|dark|future))\\b)|' +
-  'up|down|round|around|over|there|home'
+  'up|down|upstairs|downstairs|round|around|over|there|home|' +
+  `for (?:(?:${DETERMINER}) )?(?:${APPOINTMENT})|at (?:this|that|the) (?:pace|rate|speed)`
 // Living "in a tiny flat" is a place; "in the pain" is how it feels, even
-// with a word between: "in a cruel world", "in a lot of pain"
+// with a word between: "in a cruel world", "in a lot of pain". "Live on" is
+// also carrying on living, so only "on my own", and not "… without him" or
+// "… anymore".
 const FEELING = 'world|body|constant|pain|dark|darkness|hell|nightmare|misery|agony|fear|shadows?'
 const PLACE =
-  'far|near|nearby|close|there|abroad|alone|together|' +
+  'far|near|nearby|close|there|abroad|alone|together|next (?:door|to)|' +
+  '(?:on (?:my|our) own|by (?:myself|ourselves))(?! (?:any ?more|any longer|without|like|in)\\b)|' +
+  'by (?:the )?(?:sea|seaside|coast|beach|river)|' +
   `in (?:a|an|the|that|those|our|his|her|their)(?! (?:\\w+ (?:of )?)?(?:${FEELING})\\b)|` +
   `with (?:(?:${DETERMINER}) )?(?:${FAMILY})(?! (?:gone|dead)\\b)`
+// A time to wake, as it reads once leetspeak is folded: "5am" reads "sam",
+// "6.30am" "6 eoam". "At all" and "in the morning" are how it feels, and so
+// is waking in hospital "again", as people say it after an attempt.
+const DIGIT = '[\\doieast]'
+const WAKING =
+  `at ${DIGIT}{1,2}(?: ${DIGIT}{2})? ?(?:am|pm|oclock)|` +
+  'in (?:(?:a|the) )?(?:hospital|hospice|ward|icu|intensive care|(?:care|nursing) home)(?! (?:\\w+ )?again\\b)'
 const SOMEONE = `${DETERMINER}|${FAMILY}|him|them|you|us|everyone|everybody|anyone|anybody`
 
 // A determiner that starts how long or how it feels, not where: "the same
@@ -95,7 +161,11 @@ const SOMEONE = `${DETERMINER}|${FAMILY}|him|them|you|us|everyone|everybody|anyo
 const SPAN = 'day|night|morning|week|month|year|hour|minute|moment|second'
 const HOW_LONG =
   '(?:the|this|that) (?:same )?way|(?:this|that) (?:much|any ?more|any longer)|' +
-  `a single (?:${SPAN})|an? (?:${SPAN}) (?:more|longer)|the rest of (?:my|our) li(?:fe|ves)`
+  `a single (?:${SPAN})|an? (?:${SPAN}) (?:more|longer)|${REST_OF_LIFE}`
+
+// "To" as people text it: "want 2 …", "want2…". Only where a pattern
+// already reads "to": a 2 anywhere else is a count.
+const TO = '(?: to | ?2 ?)'
 
 // Crisis language. In groups this holds the post for a person to read and
 // shows the author resources; in private messages it is delivered with
@@ -106,19 +176,22 @@ export const SELF_HARM: RegExp[] = [
   /\bunalive (?:myself|me)\b/u,
   /\bend(?:ing)? (?:it all|my (?:own )?life)\b/u,
   /\btak(?:e|ing) my (?:own )?life\b(?! (?:back|savings)\b)/u,
-  /\b(?:(?:wants?|wanting|wanted) to|wanna) die\b/u,
+  new RegExp(`\\b(?:(?:wants?|wanting|wanted)${TO}|wanna )die\\b`, 'u'),
   /\bwish (?:i|id) (?:was|were|could be) dead\b/u,
   /\bwish i (?:wasnt|werent|hadnt been) (?:alive|here|born)\b/u,
-  /\b(?:dont|do not) (?:want to|wanna) (?:be alive|be here anymore|exist)\b/u,
-  new RegExp(`\\b(?:dont|do not) (?:want to|wanna) live\\b(?! (?:${PLACE})\\b)`, 'u'),
-  new RegExp(`\\b(?:dont|do not) (?:want to|wanna) wake up\\b(?! (?!the next\\b|(?:${HOW_LONG})\\b)(?:${SOMEONE}|early)\\b)`, 'u'),
-  /\bno (?:reason|point) (?:to|in) (?:live|living|go on|going on)\b/u,
+  new RegExp(`\\b(?:dont|do not) (?:want${TO}|wanna )(?:be alive|be here anymore|exist)\\b`, 'u'),
+  new RegExp(`\\b(?:dont|do not) (?:want${TO}|wanna )live\\b(?! (?:${PLACE})\\b)`, 'u'),
+  new RegExp(
+    `\\b(?:dont|do not) (?:want${TO}|wanna )wake up\\b(?! (?!the next\\b|(?:${HOW_LONG})\\b)(?:${SOMEONE}|early|${WAKING})\\b)`,
+    'u',
+  ),
+  new RegExp(`\\bno (?:reason|point)(?:${TO}| in )(?:live|living|go on|going on)\\b`, 'u'),
   /\bbetter off without me\b/u,
-  new RegExp(`\\b(?:cant|cannot|can not) go on\\b(?! (?!(?:${HOW_LONG})\\b)(?:${DETERMINER}|this|${OUTING})\\b)`, 'u'),
+  new RegExp(`\\b(?:cant|cannot|can not) go on\\b(?! (?!(?:${HOW_LONG})\\b)(?:${PLAN})\\b)`, 'u'),
   new RegExp(`\\b(?:cant|cannot|can not) keep going\\b(?! (?!(?:${HOW_LONG})\\b)(?:${DETERMINER}|this|${DIRECTION})\\b)`, 'u'),
   /\bsuicid(?:e|al)\b/u,
   /\bself ?harm(?:ing)?\b/u,
-  /\b(?:going to|gonna|want to|wanna|will) (?:overdose|od)\b/u,
+  new RegExp(`\\b(?:(?:going|want)${TO}|gonna |wanna |will )(?:overdose|od)\\b`, 'u'),
 ]
 
 // Links are held unless they point at these well-known support resources
@@ -158,8 +231,10 @@ export const LINK = new RegExp(
   'gu',
 )
 
-// The last label starts with a letter, so "tomorrow@10.15" is a time
-export const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z][\w-]*/gu
+// The last label starts with a letter, so "tomorrow@10.15" is a time. Read
+// only from where an address can start: tried from every letter of a long
+// word, it took time with the square of its length.
+export const EMAIL = /(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z][\w-]*/gu
 
 // Global: a crisis line earlier in the text must not hide a number after it
 export const PHONE: RegExp[] = [
@@ -170,6 +245,11 @@ export const PHONE: RegExp[] = [
   /\+\d[\d\s-]{8,14}\d\b/gu,
 ]
 
+// The trunk 0 kept in brackets after a country code, for callers at home:
+// "+44 (0)7700 900123". Numbers are read as dialled from abroad, without it.
+// Spaces round it don't count: "+44  (0)  7700 900123".
+export const TRUNK_ZERO = /(\+\d{1,3})\s*\(\s*0\s*\)\s*/gu
+
 // Crisis and support lines people should be able to share in groups
 export const PHONE_ALLOWLIST = ['988', '18002738255', '8002738255', '116123', '741741', '08457909090']
 
@@ -177,6 +257,10 @@ export const PHONE_ALLOWLIST = ['988', '18002738255', '8002738255', '116123', '7
 // on the UK ranges where support lines live: freephone 080…, and 03, 08 and
 // 09 at 11 digits. Australian 03 and 08 landlines have 10.
 export const SERVICE_PHONE = /^(?:080\d*|0[389]\d{9})$/
+
+// US and Canadian toll-free numbers, with or without the 1: never a
+// person's line
+export const TOLL_FREE_PHONE = /^1?8(?:00|33|44|55|66|77|88)\d{7}$/
 
 // Whitespace doesn't count: a run of spaces or tabs (pasted columns) collapses
 // on screen

@@ -100,14 +100,42 @@ const pullApart = (value: string, letters = LETTER_IN_WORD) =>
       return rest ? ` ${rest} ${letter}` : letter
     })
 
+// Credentials written apart, with spaces ("Ann M D", "Ann Ph. D."). The joined
+// view glues only three or more single letters, so two are glued here, and so
+// is a short piece with no vowel ("Ph", "Psy") with the single letters after
+// it, the last maybe plural ("Ph Ds"). A name ending in one initial ("Mo D")
+// stays apart.
+const LETTER_RUN = /(?<!\S)\p{L}(?: \p{L})+s?(?!\S)/gu
+const ABBREVIATION = /(?<!\S)(?:(?![aeiou])\p{L}){2,3}(?: \p{L})+s?(?!\S)/gu
+const gluedApart = (words: string) =>
+  [LETTER_RUN, ABBREVIATION].map((run) => words.replace(run, (pieces) => pieces.replace(/ /g, '')))
+
+// Capitals standing alone before a name are its initials ("D.R. Patel", "R. N.
+// Sharma", "M D Rahim"), not a credential, which follows a name ("Jane Doe
+// M.D.") or is a title ("Dr Patel", "D.r. Ann")
+const INITIALS = /^(?:\p{Lu}(?:\. ?| ))*\p{Lu}\.? (?=\p{L}{2})/u
+
 // A digit starting a word may be a number ("1admin") or the word's first
 // letter ("4dmin2"), so both are read
+const readsAsRole = (value: string, reserved: RegExp, { glue = true } = {}) =>
+  [value, pullApart(value), pullApart(value, FIRST_LETTER)].some((view) => {
+    const { words, joined } = normalize(view)
+    return [words, joined, ...(glue ? gluedApart(words) : [])].join(' ').split(' ').some((word) => reserved.test(word))
+  })
+
+// A dot between letters joins them ("R.N.", "Ph.D."), so the name is also read
+// with those dots taken out. Gluing every spaced letter would run two
+// credentials into one word ("Joy R.N. B.S.N." as "rnbsn"). Initials are read
+// as typed, with neither: three or more still spell a word ("A.D.M.I.N Fan"),
+// two stay apart.
 const suggestsRole = (value: string, reserved: RegExp) => {
   const plain = plainLetters(value)
-  return [plain, pullApart(plain), pullApart(plain, FIRST_LETTER)].some((view) => {
-    const { words, joined } = normalize(view)
-    return `${words} ${joined}`.split(' ').some((word) => reserved.test(word))
-  })
+  const named = plain.replace(INITIALS, '')
+  const undotted = named.replace(/(?<=\p{L})\.(?=\p{L})/gu, '')
+  return (
+    readsAsRole(plain, reserved, { glue: false }) ||
+    [...new Set([named, undotted])].some((view) => readsAsRole(view, reserved))
+  )
 }
 
 // Chat and group names ({ chat: true }) name a conversation, not a person, so
@@ -119,7 +147,8 @@ export const checkPenName = (input: string, { chat = false } = {}): PenNameCheck
   if (value.length < 2 || value.length > 32) return { ok: false, problem: 'length' }
   if (!isMadeOfNameCharacters(value)) return { ok: false, problem: 'characters' }
   if (chat ? value.split(' ').some(mixesScripts) : mixesScripts(value)) return { ok: false, problem: 'mixed' }
-  if (/\d{6,}/.test(value)) return { ok: false, problem: 'contact' }
+  // In any script's digits, as Arabic, Persian or Hindi keyboards type them
+  if (/\p{Nd}{6,}/u.test(value)) return { ok: false, problem: 'contact' }
 
   if (suggestsRole(value, chat ? RESERVED_SINGULAR : RESERVED)) return { ok: false, problem: 'reserved' }
   if (moderate(value, { context: 'public' }).action === 'hold') return { ok: false, problem: 'unkind' }
