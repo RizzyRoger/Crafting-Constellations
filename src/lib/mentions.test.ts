@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { insertMention, keptMentions, matchPeople, mentionQuery } from './mentions'
+import { imeKey, insertMention, keptMentions, matchPeople, mentionQuery } from './mentions'
 
 describe('mentionQuery', () => {
   it('finds the @name being typed at the caret', () => {
@@ -18,6 +18,17 @@ describe('mentionQuery', () => {
     expect(mentionQuery('@Fern  and', 10)).toBeNull()
     expect(mentionQuery('@ Fern', 6)).toBeNull()
     expect(mentionQuery('no at sign', 10)).toBeNull()
+  })
+
+  it('reads a vowel sign before the @ as part of a word', () => {
+    expect(mentionQuery('hi @प्रि', 8)).toEqual({ start: 3, query: 'प्रि' })
+    const text = 'नमस्ते@प्रि'
+    expect(mentionQuery(text, text.length)).toBeNull()
+  })
+
+  it('opens straight after an emoji', () => {
+    expect(mentionQuery('\u2764\ufe0f@Fe', 5)).toEqual({ start: 2, query: 'Fe' })
+    expect(mentionQuery('1\ufe0f\u20e3@Fe', 6)).toEqual({ start: 3, query: 'Fe' })
   })
 
   it('stops looking past a pen name’s length', () => {
@@ -64,5 +75,27 @@ describe('keptMentions', () => {
     expect(keptMentions('thanks @Fern', picked)).toEqual(['f'])
     expect(keptMentions('thanks @Fern and @Quiet Heron', picked)).toEqual(['f', 'q'])
     expect(keptMentions('thanks', picked)).toEqual([])
+  })
+
+  it('drops a pick whose name only starts a longer picked name', () => {
+    const picked = new Map([
+      ['q', 'Quiet'],
+      ['qh', 'Quiet Heron'],
+    ])
+    expect(keptMentions('@Quiet Heron thank you', picked)).toEqual(['qh'])
+    expect(keptMentions('@Quiet and @Quiet Heron', picked)).toEqual(['q', 'qh'])
+  })
+})
+
+describe('imeKey', () => {
+  it('leaves keys to an IME that is composing, or that just confirmed in Safari', () => {
+    expect(imeKey({ isComposing: true, keyCode: 229 })).toBe(true)
+    expect(imeKey({ isComposing: false, keyCode: 229 })).toBe(true)
+    expect(imeKey({ isComposing: true, keyCode: 40 })).toBe(true)
+  })
+
+  it('lets ordinary keys pick, move and send', () => {
+    expect(imeKey({ isComposing: false, keyCode: 13 })).toBe(false)
+    expect(imeKey({ isComposing: false, keyCode: 40 })).toBe(false)
   })
 })

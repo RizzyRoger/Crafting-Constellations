@@ -1,21 +1,27 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
+import { claimModerator } from '../auth/moderator'
 import { PageHead } from '../components/PageHead'
 import { bootstrapAdmin, describeError } from '../lib/callables'
 
-// For the first admin: works only for verified emails on the ADMIN_EMAILS list
+// Where Review sends anyone whose token doesn't say moderator. Someone another moderator made one
+// gets in with a fresh token; the first moderator needs a verified email on the ADMIN_EMAILS list
 export const AdminClaim = () => {
   const { claims, refreshClaims } = useMe()
   const [error, setError] = useState<string | null>(null)
+
+  // The token here can predate "Make moderator" by up to an hour; a fresh one opens Review
+  useEffect(() => {
+    refreshClaims().catch(() => undefined)
+  }, [refreshClaims])
 
   if (claims.admin) return <Navigate to="/admin" replace />
 
   const claim = async () => {
     setError(null)
     try {
-      await bootstrapAdmin({})
-      await refreshClaims()
+      await claimModerator({ refresh: refreshClaims, bootstrap: () => bootstrapAdmin({}) })
     } catch (e) {
       setError(describeError(e))
     }

@@ -16,9 +16,11 @@ import { HEAD_DESCENDING } from '../wash/strokes'
 // Matches functions/src/chats.ts
 const MAX_CHAT_PEOPLE = 20
 
-// Chat names pass the same checks as pen names; only some hints read differently
+// Chat names pass the pen-name checks in their chat form, as functions/src/chats.ts
+// does, so the hint matches the server; some hints read differently
 const NAME_HINTS: Record<PenNameProblem, string> = {
   ...PEN_NAME_HINTS,
+  mixed: 'Keep each word to one alphabet, so no letter can pass for another.',
   contact: 'No emails or long numbers.',
   reserved: 'Choose a name that doesn’t suggest a title or role.',
 }
@@ -50,7 +52,7 @@ export const NewChat = () => {
     .filter((p): p is Profile => Boolean(p) && !p!.banned)
     .sort((a, b) => a.penName.localeCompare(b.penName))
 
-  const check = checkPenName(name)
+  const check = checkPenName(name, { chat: true })
   const hint = name.trim() && !check.ok ? NAME_HINTS[check.problem] : null
   const full = picked.length >= MAX_CHAT_PEOPLE - 1
 

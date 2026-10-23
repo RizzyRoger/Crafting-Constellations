@@ -48,7 +48,17 @@ const radiusFor = (role: EgoRole, shared: number) => {
   return 5 + Math.min(10, Math.sqrt(Math.max(0, shared)) * 4)
 }
 
-export const layoutEgo = ({ width, height, me, friendships, pending, blocked = [], sharedGroups }: EgoInput): EgoLayout => {
+// Who sits around you: friends and pending requests on the first ring, each friend's own
+// friends one step out, blocked people nowhere. The chart places them; the List view and
+// the dots' labels name them
+export interface EgoCircle {
+  friends: Set<string>
+  pending: Set<string>
+  // A friend's friend, and the friends of yours they're tied to. They're drawn beside the first
+  through: Map<string, string[]>
+}
+
+export const egoCircle = ({ me, friendships, pending, blocked = [] }: Pick<EgoInput, 'me' | 'friendships' | 'pending' | 'blocked'>): EgoCircle => {
   const blockedSet = new Set(blocked)
   const friendSet = new Set<string>()
   for (const tie of friendships) {
@@ -65,17 +75,24 @@ export const layoutEgo = ({ width, height, me, friendships, pending, blocked = [
   }
 
   const direct = new Set([...friendSet, ...pendingSet])
-  const via = new Map<string, string>()
+  const through = new Map<string, string[]>()
   for (const tie of friendships) {
     const [a, b] = tie.uids
     const consider = (person: string, friend: string) => {
-      if (person === me || direct.has(person) || blockedSet.has(person) || via.has(person)) return
-      if (!friendSet.has(friend)) return
-      via.set(person, friend)
+      if (person === me || direct.has(person) || blockedSet.has(person)) return
+      if (!friendSet.has(friend) || through.get(person)?.includes(friend)) return
+      through.set(person, [...(through.get(person) ?? []), friend])
     }
     consider(b, a)
     consider(a, b)
   }
+
+  return { friends: friendSet, pending: pendingSet, through }
+}
+
+export const layoutEgo = ({ width, height, me, friendships, pending, blocked = [], sharedGroups }: EgoInput): EgoLayout => {
+  const { friends: friendSet, pending: pendingSet, through } = egoCircle({ me, friendships, pending, blocked })
+  const direct = new Set([...friendSet, ...pendingSet])
 
   const cx = width / 2
   const cy = height / 2
@@ -93,7 +110,7 @@ export const layoutEgo = ({ width, height, me, friendships, pending, blocked = [
   })
 
   const byFriend = new Map<string, string[]>()
-  for (const [uid, friend] of via) {
+  for (const [uid, [friend]] of through) {
     const list = byFriend.get(friend) ?? []
     list.push(uid)
     byFriend.set(friend, list)

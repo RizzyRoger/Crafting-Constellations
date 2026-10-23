@@ -6,6 +6,7 @@ import { Who } from '../components/Who'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import { otherInPair } from '../lib/pair'
+import { visibleById, withVisible } from '../lib/people'
 import { ago } from '../lib/time'
 import type { Connection, Profile } from '../lib/types'
 import { HEAD_DESCENDING } from '../wash/strokes'
@@ -31,7 +32,9 @@ export const Messages = () => {
   const people = useQueryData<Profile>('people', () => collection(db, 'users'))
   const byId = new Map(people.data.map((p) => [p.id, p]))
 
-  const accepted = connections.data.filter((c) => c.status === 'accepted')
+  // Someone banned keeps the connection (an unban brings it back) but can never read a note, so
+  // isn't offered here. Conversations already written stay, so their history can still be read
+  const accepted = withVisible(connections.data.filter((c) => c.status === 'accepted'), visibleById(people.data), uid)
   const threadIds = new Set(threads.data.map((t) => t.id))
   const sorted = [...threads.data].sort((a, b) => (b.lastMessageAt?.toMillis() ?? 0) - (a.lastMessageAt?.toMillis() ?? 0))
   const quiet = accepted.filter((c) => !threadIds.has(c.id))
@@ -102,7 +105,8 @@ export const Messages = () => {
             </section>
           )}
 
-          {accepted.length === 0 && (
+          {/* Not while loading: until both lists are in, it would tell someone with friends to go and find some */}
+          {!connections.loading && !people.loading && accepted.length === 0 && (
             <p className="pencil note">
               To write privately, reach out to someone from your <Link to="/constellation">constellation</Link>. Once they accept, you can write here.
             </p>

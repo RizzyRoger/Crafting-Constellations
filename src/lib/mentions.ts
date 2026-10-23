@@ -1,4 +1,4 @@
-import { hasMention, MAX_MENTIONS } from '@moderation'
+import { MAX_MENTIONS, mentionedIn } from '@moderation'
 
 export interface MentionQuery {
   // index of the @
@@ -6,7 +6,9 @@ export interface MentionQuery {
   query: string
 }
 
-const WORD = /[\p{L}\p{N}]/u
+// A vowel sign continues a word and an emoji's selector or keycap doesn't, as
+// in functions' mentions.ts
+const WORD = /[\p{L}\p{N}]|(?!\p{Default_Ignorable_Code_Point})[\p{Mn}\p{Mc}]/u
 
 // The @name being typed at the caret: an @ that starts a word, then up to a
 // pen name's length on one line. Pen names hold single spaces, so those count.
@@ -43,5 +45,11 @@ export const matchPeople = <T extends { penName: string }>(people: readonly T[],
 }
 
 // The picked people whose @name is still in the words, as the server will check
-export const keptMentions = (text: string, picked: ReadonlyMap<string, string>) =>
-  [...picked].filter(([, penName]) => hasMention(text, penName)).map(([uid]) => uid).slice(0, MAX_MENTIONS)
+export const keptMentions = (text: string, picked: ReadonlyMap<string, string>) => {
+  const named = mentionedIn(text, [...picked].map(([uid, penName]) => ({ uid, penName })))
+  return [...picked.keys()].filter((uid) => named.has(uid)).slice(0, MAX_MENTIONS)
+}
+
+// A key the IME is using: still composing, or (Safari) the Enter that confirmed
+// it, which arrives just after compositionend with keyCode 229
+export const imeKey = (e: { isComposing: boolean; keyCode: number }) => e.isComposing || e.keyCode === 229

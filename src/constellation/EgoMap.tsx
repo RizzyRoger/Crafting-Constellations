@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import type { Profile } from '../lib/types'
-import { layoutEgo, type EgoTie } from './egoLayout'
+import { click, dragOf, holdsPage, IDLE, lift, markDragged, pressDot, type Gesture } from './egoGesture'
+import { egoCircle, layoutEgo, type EgoTie } from './egoLayout'
 import { atRest, holdAt, settle, startSim, stepSim, type Hold, type Sim } from './egoPhysics'
+import { describeDot } from './inWords'
 
 interface EgoMapProps {
   me: string
@@ -9,19 +11,22 @@ interface EgoMapProps {
   friendships: EgoTie[]
   pending: EgoTie[]
   blocked: string[]
+  // People whose request is waiting on me
+  waiting: string[]
   sharedGroups: Record<string, number>
   selected: string | null
   onSelect: (uid: string) => void
 }
 
-// Less movement than this is a tap that opens the person, not a drag
-const DRAG_FROM_PX = 4
+// The chart is never shorter than this, and otherwise this much of its width
+const MIN_HEIGHT = 520
+const HEIGHT_PER_WIDTH = 0.72
 // About half a label's width per letter at 15px, to keep names inside the chart's edges
 const HALF_LETTER = 4.2
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-export const EgoMap = ({ me, people, friendships, pending, blocked, sharedGroups, selected, onSelect }: EgoMapProps) => {
+export const EgoMap = ({ me, people, friendships, pending, blocked, waiting, sharedGroups, selected, onSelect }: EgoMapProps) => {
   const ref = useRef<HTMLDivElement>(null)
   const svg = useRef<SVGSVGElement>(null)
   const [width, setWidth] = useState(0)
@@ -33,20 +38,21 @@ export const EgoMap = ({ me, people, friendships, pending, blocked, sharedGroups
     return () => observer.disconnect()
   }, [])
 
-  const height = Math.max(520, Math.round(width * 0.72))
+  const height = Math.max(MIN_HEIGHT, Math.round(width * HEIGHT_PER_WIDTH))
   const layout = useMemo(
     () => (width > 0 ? layoutEgo({ width, height, me, friendships, pending, blocked, sharedGroups }) : null),
     [width, height, me, friendships, pending, blocked, sharedGroups],
   )
   const byId = useMemo(() => new Map(people.map((p) => [p.id, p])), [people])
+  // Friend, request or friend's friend: the chart shows it by ring and line, the labels say it
+  const circle = useMemo(() => egoCircle({ me, friendships, pending, blocked }), [me, friendships, pending, blocked])
+  const waitingSet = useMemo(() => new Set(waiting), [waiting])
 
   // The animation steps `sim`; `frame` is what's drawn. Both start settled from the layout.
   const sim = useRef<Sim | null>(null)
   const [frame, setFrame] = useState<Sim | null>(null)
   const hold = useRef<Hold | null>(null)
-  const press = useRef<{ uid: string; pointerId: number; x: number; y: number } | null>(null)
-  // The last press became a drag: its click must not open the person
-  const dragged = useRef(false)
+  const gesture = useRef<Gesture>(IDLE)
   const loop = useRef<number | null>(null)
   const [dragging, setDragging] = useState<string | null>(null)
 
@@ -62,6 +68,19 @@ export const EgoMap = ({ me, people, friendships, pending, blocked, sharedGroups
     },
     [],
   )
+
+  // Chrome ignores touch-action on an SVG <g>, so a finger dragging a dot would pan the page instead,
+  // which cancels the drag. Keep the page still only while a dot is pressed; anywhere else on the
+  // chart a finger scrolls the page as usual
+  useEffect(() => {
+    const figure = ref.current
+    if (!figure) return
+    const keepStill = (event: TouchEvent) => {
+      if (holdsPage(gesture.current)) event.preventDefault()
+    }
+    figure.addEventListener('touchmove', keepStill, { passive: false })
+    return () => figure.removeEventListener('touchmove', keepStill)
+  }, [])
 
   // Step while someone holds a dot or anything is still moving, then stop
   const animate = () => {
@@ -93,19 +112,17 @@ export const EgoMap = ({ me, people, friendships, pending, blocked, sharedGroups
     } catch {
       // The pointer is already gone (lifted, or not a live pointer); moves still arrive while it's over the dot
     }
-    press.current = { uid, pointerId: event.pointerId, x: event.clientX, y: event.clientY }
-    dragged.current = false
+    gesture.current = pressDot({ uid, pointerId: event.pointerId, x: event.clientX, y: event.clientY })
   }
 
   const move = (event: PointerEvent<SVGGElement>) => {
-    const pressed = press.current
-    if (!pressed || pressed.pointerId !== event.pointerId) return
-    if (!hold.current && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < DRAG_FROM_PX) return
+    const uid = dragOf(gesture.current, event.pointerId, event.clientX, event.clientY, hold.current !== null)
+    if (!uid) return
     const at = toChart(event)
     if (!at) return
-    if (!hold.current) setDragging(pressed.uid)
-    dragged.current = true
-    hold.current = { uid: pressed.uid, ...at }
+    if (!hold.current) setDragging(uid)
+    gesture.current = markDragged(gesture.current, uid)
+    hold.current = { uid, ...at }
     if (sim.current) {
       sim.current = holdAt(sim.current, hold.current)
       setFrame(sim.current)
@@ -114,8 +131,8 @@ export const EgoMap = ({ me, people, friendships, pending, blocked, sharedGroups
   }
 
   const release = (event: PointerEvent<SVGGElement>) => {
-    if (press.current?.pointerId !== event.pointerId) return
-    press.current = null
+    if (gesture.current.press?.pointerId !== event.pointerId) return
+    gesture.current = lift(gesture.current)
     if (!hold.current) return
     hold.current = null
     setDragging(null)
@@ -128,11 +145,9 @@ export const EgoMap = ({ me, people, friendships, pending, blocked, sharedGroups
   }
 
   const select = (uid: string) => () => {
-    if (dragged.current) {
-      dragged.current = false
-      return
-    }
-    onSelect(uid)
+    const { gesture: next, opens } = click(gesture.current, uid)
+    gesture.current = next
+    if (opens) onSelect(uid)
   }
 
   const activate = (uid: string) => (event: KeyboardEvent) => {
@@ -144,6 +159,7 @@ export const EgoMap = ({ me, people, friendships, pending, blocked, sharedGroups
 
   const at = useMemo(() => new Map(frame?.nodes.map((n) => [n.uid, n]) ?? []), [frame])
   const label = (uid: string) => (uid === me ? 'you' : (byId.get(uid)?.penName ?? 'someone'))
+  const described = (uid: string) => describeDot(uid, me, circle, waitingSet, label)
   const labelX = (x: number, text: string, chartWidth: number) => {
     const half = text.length * HALF_LETTER + 4
     return Math.min(chartWidth - half, Math.max(half, x))
@@ -151,7 +167,7 @@ export const EgoMap = ({ me, people, friendships, pending, blocked, sharedGroups
 
   return (
     <figure className="ego" ref={ref}>
-      {layout && frame && (
+      {layout && frame ? (
         <svg ref={svg} viewBox={`0 0 ${layout.width} ${layout.height}`} width="100%" height={layout.height} role="group" aria-label="People connected to you">
           {layout.edges.map((edge) => {
             const a = at.get(edge.a)
@@ -177,7 +193,7 @@ export const EgoMap = ({ me, people, friendships, pending, blocked, sharedGroups
                 className={classes.filter(Boolean).join(' ')}
                 tabIndex={0}
                 role="button"
-                aria-label={label(node.uid)}
+                aria-label={described(node.uid)}
                 aria-pressed={node.uid === selected}
                 onClick={select(node.uid)}
                 onKeyDown={activate(node.uid)}
@@ -193,6 +209,10 @@ export const EgoMap = ({ me, people, friendships, pending, blocked, sharedGroups
             )
           })}
         </svg>
+      ) : (
+        // Hold the chart's room until it's measured, so what follows (the person sheet) starts where it will stay.
+        // An svg of the chart's proportions takes the same box: full width, never shorter than MIN_HEIGHT
+        <svg viewBox={`0 0 1 ${HEIGHT_PER_WIDTH}`} width="100%" style={{ minHeight: MIN_HEIGHT }} aria-hidden="true" />
       )}
       <figcaption className="ego__note">
         Dots are larger when you share more groups. Lines are your direct ties, and your friends’ own. A friend’s friend sits one step further out — choose anyone to reach out, or drag them to move the chart around you.

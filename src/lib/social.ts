@@ -1,4 +1,5 @@
 import { arrayRemove, deleteDoc, doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
+import { blockOf } from './blocks'
 import { db } from './firebase'
 import { pairIdOf } from './pair'
 
@@ -21,6 +22,12 @@ export const acceptConnection = (pairId: string) =>
 
 export const blockConnection = (pairId: string, me: string) =>
   updateDoc(doc(db, 'connections', pairId), { status: 'blocked', blockedBy: me, updatedAt: serverTimestamp() })
+
+// Someone with no connection to you yet
+export const blockPerson = (me: string, other: string) => {
+  const block = blockOf(me, other)
+  return setDoc(doc(db, 'connections', block.id), block.data)
+}
 
 // Decline, cancel, disconnect, or unblock
 export const removeConnection = (pairId: string) => deleteDoc(doc(db, 'connections', pairId))

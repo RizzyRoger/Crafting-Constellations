@@ -1,5 +1,5 @@
 import { collection, collectionGroup, orderBy, query, where } from 'firebase/firestore'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { Quiet } from '../components/Quiet'
@@ -8,8 +8,10 @@ import { ConstellationMap } from '../constellation/ConstellationMap'
 import { EgoMap } from '../constellation/EgoMap'
 import type { EgoTie } from '../constellation/egoLayout'
 import { PersonSheet } from '../constellation/PersonSheet'
+import { CHOOSE } from '../constellation/sheetReveal'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
+import { waitingOn, withVisible } from '../lib/people'
 import type { Connection, Constellation as ConstellationDoc, Group, Profile } from '../lib/types'
 import { Blot } from '../wash/Blot'
 
@@ -30,7 +32,9 @@ export const Constellation = () => {
   const [params, setParams] = useSearchParams()
   const requested = params.get('view')
   const view: View = isView(requested) ? requested : 'friends'
-  const [selected, setSelected] = useState<string | null>(params.get('person'))
+  // Whoever the address names is open, so the two always agree: searching for someone already
+  // named there still opens them after choosing someone else, and a reload reopens who's on screen
+  const selected = params.get('person')
 
   const setView = (next: View) => {
     const nextParams = new URLSearchParams(params)
@@ -39,10 +43,13 @@ export const Constellation = () => {
     setParams(nextParams, { replace: true })
   }
 
-  useEffect(() => {
-    const requested = params.get('person')
-    if (requested) setSelected(requested)
-  }, [params])
+  const selectPerson = (person: string | null) => {
+    const nextParams = new URLSearchParams(params)
+    if (person) nextParams.set('person', person)
+    else nextParams.delete('person')
+    // Marked as a choice, so choosing whoever is open already still brings their sheet up
+    setParams(nextParams, { replace: true, state: person ? CHOOSE : undefined })
+  }
 
   const constellations = useQueryData<ConstellationDoc>('constellations', () => query(collection(db, 'constellations'), orderBy('order')))
   const groups = useQueryData<Group>('groups', () => collection(db, 'groups'))
@@ -58,13 +65,19 @@ export const Constellation = () => {
   const peopleById = useMemo(() => new Map(visiblePeople.map((p) => [p.id, p])), [visiblePeople])
   const myGroupIds = useMemo(() => new Set(memberships.filter((m) => m.uid === uid).map((m) => m.groupId)), [memberships, uid])
 
+  // Only ties among people with a visible profile, so a banned friend isn't a dot that opens nothing
   const friendshipTies = useMemo(
-    () => friendships.data.flatMap((f) => { const tie = asTie(f.id, f.uids ?? []); return tie ? [tie] : [] }),
-    [friendships.data],
+    () => withVisible(friendships.data.flatMap((f) => { const tie = asTie(f.id, f.uids ?? []); return tie ? [tie] : [] }), peopleById, uid),
+    [friendships.data, peopleById, uid],
   )
   const pendingTies = useMemo(
-    () => connections.data.filter((c) => c.status === 'pending').flatMap((c) => { const tie = asTie(c.id, c.uids ?? []); return tie ? [tie] : [] }),
-    [connections.data],
+    () =>
+      withVisible(
+        connections.data.filter((c) => c.status === 'pending').flatMap((c) => { const tie = asTie(c.id, c.uids ?? []); return tie ? [tie] : [] }),
+        peopleById,
+        uid,
+      ),
+    [connections.data, peopleById, uid],
   )
   const blocked = useMemo(
     () => connections.data.filter((c) => c.status === 'blocked').map((c) => c.uids.find((id) => id !== uid) ?? '').filter(Boolean),
@@ -82,17 +95,9 @@ export const Constellation = () => {
   const person = selected ? peopleById.get(selected) : undefined
   const connectionWith = (other: string) => (other === uid ? undefined : connections.data.find((c) => c.uids.includes(other)))
   const groupsOf = (other: string) => groups.data.filter((g) => memberships.some((m) => m.uid === other && m.groupId === g.id))
-  const incoming = connections.data.filter((c) => c.status === 'pending' && c.recipient === uid)
+  const incoming = useMemo(() => waitingOn(connections.data, peopleById, uid), [connections.data, peopleById, uid])
+  const waiting = useMemo(() => incoming.map((c) => c.requester), [incoming])
   const loading = constellations.loading || groups.loading || people.loading || friendships.loading || connections.loading
-
-  const closeSheet = () => {
-    setSelected(null)
-    if (params.get('person')) {
-      const next = new URLSearchParams(params)
-      next.delete('person')
-      setParams(next, { replace: true })
-    }
-  }
 
   return (
     <>
@@ -101,7 +106,7 @@ export const Constellation = () => {
       {incoming.length > 0 && (
         <p className="banner pencil" style={{ marginBottom: 20 }}>
           {incoming.length === 1 ? 'Someone wants to connect with you.' : `${incoming.length} people want to connect with you.`}{' '}
-          <button type="button" className="link-btn" onClick={() => setSelected(incoming[0].requester)}>
+          <button type="button" className="link-btn" onClick={() => selectPerson(incoming[0].requester)}>
             See who
           </button>
         </p>
@@ -134,9 +139,10 @@ export const Constellation = () => {
                 friendships={friendshipTies}
                 pending={pendingTies}
                 blocked={blocked}
+                waiting={waiting}
                 sharedGroups={sharedGroups}
                 selected={selected}
-                onSelect={setSelected}
+                onSelect={selectPerson}
               />
             )
           ) : view === 'groups' ? (
@@ -152,7 +158,7 @@ export const Constellation = () => {
               me={uid}
               myGroupIds={myGroupIds}
               selected={selected}
-              onSelect={setSelected}
+              onSelect={selectPerson}
             />
           ) : (
             <ConstellationList
@@ -162,7 +168,11 @@ export const Constellation = () => {
               people={peopleById}
               myGroupIds={myGroupIds}
               me={uid}
-              onSelect={setSelected}
+              friendships={friendshipTies}
+              pending={pendingTies}
+              waiting={waiting}
+              blocked={blocked}
+              onSelect={selectPerson}
             />
           )}
 
@@ -174,7 +184,7 @@ export const Constellation = () => {
               verified={claims.emailVerified}
               connection={connectionWith(person.id)}
               groups={groupsOf(person.id)}
-              onClose={closeSheet}
+              onClose={() => selectPerson(null)}
             />
           )}
         </div>

@@ -1,7 +1,7 @@
 import { moderate, type Context } from '@moderation'
 import { useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from 'react'
 import { describeError } from '../lib/callables'
-import { insertMention, keptMentions, matchPeople, mentionQuery } from '../lib/mentions'
+import { imeKey, insertMention, keptMentions, matchPeople, mentionQuery } from '../lib/mentions'
 import type { Profile } from '../lib/types'
 import { Blot } from '../wash/Blot'
 
@@ -109,6 +109,8 @@ export const Composer = ({
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter, arrows and Escape confirm or steer an IME's composition, not the list
+    if (imeKey(e.nativeEvent)) return
     if (listOpen && query) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()

@@ -9,13 +9,16 @@ export const Verify = () => {
   const { user, claims, profile, refreshClaims } = useAuth()
   const [note, setNote] = useState<string | null>(null)
 
+  // Each press empties the note first, so the same words are announced again
   const resend = async () => {
     if (!user) return
+    setNote(null)
     await sendEmailVerification(user).catch(() => undefined)
     setNote('Sent again. It can take a minute.')
   }
 
   const check = async () => {
+    setNote(null)
     await refreshClaims()
     setNote(user?.emailVerified ? null : 'Not confirmed yet. Open the link in the email, then try again.')
   }
@@ -39,7 +42,10 @@ export const Verify = () => {
     >
       <div className="stack">
         {USING_EMULATORS && <p className="meta">Local emulator: the link is in the Auth emulator log (terminal running the emulators).</p>}
-        {note && <p className="hint">{note}</p>}
+        {/* Mounted from the start, so screen readers announce the note when it lands */}
+        <p className="hint live" role="status">
+          {note}
+        </p>
         <div className="row">
           <button type="button" className="act act--wash" onClick={() => void check()}>
             I’ve confirmed it

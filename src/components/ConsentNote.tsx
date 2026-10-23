@@ -11,8 +11,9 @@ export const ConsentNote = () => {
         May we count visits?
       </p>
       <p className="hint">
-        It shows us which pages are slow or confusing: page addresses and load times, never your name or anything you write. Nothing is used
-        for ads.
+        It shows us which pages are slow or confusing: page addresses and load times. An address can hold account, group, post and chat
+        ids and a group’s name (a private thread’s holds both people’s account ids), never your name or anything you write.
+        Nothing is used for ads.
       </p>
       <div className="row">
         <button type="button" className="act act--quiet act--wash" onClick={() => void setCountVisits(true)}>

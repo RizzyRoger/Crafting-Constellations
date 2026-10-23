@@ -193,6 +193,10 @@ a:focus-visible .swatch,
   outline: none;
 }
 
+.field .error {
+  margin-top: 4px;
+}
+
 .field input::placeholder {
   color: var(--meta-readable);
 }
@@ -277,6 +281,12 @@ a:focus-visible .swatch,
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* A live region stays mounted so screen readers hear what lands in it. Empty, it leaves the
+   grid (no gap for it) but stays in the accessibility tree, unlike display: none */
+.live:empty {
+  position: absolute;
 }
 
 .synthetic {

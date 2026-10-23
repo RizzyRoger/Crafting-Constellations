@@ -8,6 +8,7 @@ import { Who } from '../components/Who'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import { otherInPair } from '../lib/pair'
+import { visibleById, waitingOn, withVisible } from '../lib/people'
 import { acceptConnection, blockConnection, removeConnection } from '../lib/social'
 import { setCountVisits, TELEMETRY_AVAILABLE, useCountVisits } from '../lib/telemetry'
 import type { Connection, Profile } from '../lib/types'
@@ -22,10 +23,12 @@ export const Me = () => {
   )
   const people = useQueryData<Profile>('people', () => collection(db, 'users'))
   const byId = new Map(people.data.map((p) => [p.id, p]))
+  const visible = visibleById(people.data)
 
-  const incoming = connections.data.filter((c) => c.status === 'pending' && c.recipient === uid)
-  const outgoing = connections.data.filter((c) => c.status === 'pending' && c.requester === uid)
-  const friends = connections.data.filter((c) => c.status === 'accepted')
+  // Someone banned keeps their ties but drops out of these lists; the ones I blocked stay, so I can undo it
+  const incoming = waitingOn(connections.data, visible, uid)
+  const outgoing = withVisible(connections.data.filter((c) => c.status === 'pending' && c.requester === uid), visible, uid)
+  const friends = withVisible(connections.data.filter((c) => c.status === 'accepted'), visible, uid)
   const blocked = connections.data.filter((c) => c.status === 'blocked' && c.blockedBy === uid)
 
   const personOf = (c: Connection) => {
@@ -117,7 +120,8 @@ export const Me = () => {
         <div className="section__head">
           <h2 id="profile">Pen name</h2>
         </div>
-        <ProfileForm key={profile.penName} uid={uid} current={profile} submitLabel="Save" />
+        {/* Keyed on the person, not the pen name: its own rename would remount it and lose 'Saved.' and the crisis card */}
+        <ProfileForm key={uid} uid={uid} current={profile} submitLabel="Save" />
       </section>
 
       <section className="section" aria-labelledby="account">
@@ -132,7 +136,10 @@ export const Me = () => {
           <label className="code row" style={{ gap: 6 }}>
             <input type="checkbox" checked={countVisits === 'yes'} onChange={(e) => void setCountVisits(e.target.checked)} />
             Count my visits on this device
-            <span className="meta">— which pages open and how fast they load, never your name or your writing</span>
+            <span className="meta">
+              — page addresses and load times. An address can hold account, group, post and chat ids and a group’s name, never your
+              name or anything you write
+            </span>
           </label>
         )}
         <div className="row">

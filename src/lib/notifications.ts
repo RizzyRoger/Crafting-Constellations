@@ -23,14 +23,16 @@ interface Linkable {
   actorUid?: string
 }
 
-// Where opening a notification takes you; null for notes that are only read
-export const linkFor = (notice: Linkable, me: string): string | null => {
+// Where opening a notification takes you; null for notes that are only read, and for
+// a chat you're no longer in (`readable` false), which has no way back in. A group
+// still opens: anyone can join it again
+export const linkFor = (notice: Linkable, me: string, readable?: boolean): string | null => {
   if (notice.type === 'accepted') return notice.actorUid ? `/messages/${pairIdOf(me, notice.actorUid)}` : null
   if (notice.type !== 'mention' && notice.type !== 'comment') return null
   const place = placeOf(notice.contentPath)
   if (!place) return null
   if (place.kind === 'groupMessage') return `/groups/${place.groupId}`
-  if (place.kind === 'chatMessage') return `/chats/${place.chatId}`
+  if (place.kind === 'chatMessage') return readable === false ? null : `/chats/${place.chatId}`
   return `/groups/${place.groupId}/posts/${place.postId}`
 }
 

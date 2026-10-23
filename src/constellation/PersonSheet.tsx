@@ -1,11 +1,13 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { Report } from '../components/Report'
 import { Who } from '../components/Who'
+import { howToBlock } from '../lib/blocks'
 import { describeError } from '../lib/callables'
 import { pairIdOf } from '../lib/pair'
-import { acceptConnection, blockConnection, removeConnection, requestConnection } from '../lib/social'
+import { acceptConnection, blockConnection, blockPerson, removeConnection, requestConnection } from '../lib/social'
 import type { Connection, Group, Profile } from '../lib/types'
+import { lastChoice, revealSheet, SHEET_FLOATS } from './sheetReveal'
 
 interface PersonSheetProps {
   person: Profile
@@ -20,8 +22,23 @@ interface PersonSheetProps {
 export const PersonSheet = ({ person, me, verified, connection, groups, onClose }: PersonSheetProps) => {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const sheet = useRef<HTMLElement>(null)
   const pairId = pairIdOf(me, person.id)
   const isMe = person.id === me
+  const location = useLocation()
+  const [chosenAt, setChosenAt] = useState(location.key)
+  const choice = lastChoice(chosenAt, location)
+  if (choice !== chosenAt) setChosenAt(choice)
+
+  // Narrower than the floating overlay, the sheet opens under the chart, out of sight. Bring it
+  // into view and move focus to it, so choosing someone visibly does something. This runs when the
+  // sheet opens (it's keyed by person) and again each time this person is chosen while it's open
+  useEffect(() => {
+    const reveal = revealSheet(window.matchMedia(SHEET_FLOATS).matches, window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    if (!reveal || !sheet.current) return
+    sheet.current.scrollIntoView(reveal)
+    sheet.current.focus({ preventScroll: true })
+  }, [choice])
 
   const run = (action: () => Promise<unknown>) => async () => {
     setBusy(true)
@@ -38,9 +55,12 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
   const status = connection?.status
   const iAsked = connection?.requester === me
   const blockedByMe = status === 'blocked' && connection?.blockedBy === me
+  // A stranger who keeps pinging you can be blocked too, with no request between you first
+  const blockBy = howToBlock(connection)
+  const block = () => (blockBy === 'create' ? blockPerson(me, person.id) : blockConnection(pairId, me))
 
   return (
-    <section className="person sheet" aria-label={`About ${person.penName}`}>
+    <section ref={sheet} tabIndex={-1} className="person sheet" aria-label={`About ${person.penName}`}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <Who person={{ ...person, avatarSeed: person.avatarSeed || person.id }} size={44} />
         <button type="button" className="link-btn" onClick={onClose}>
@@ -127,8 +147,8 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
             </>
           )}
 
-          {connection && status !== 'blocked' && (
-            <button type="button" className="link-btn" disabled={busy} onClick={run(() => blockConnection(pairId, me))}>
+          {blockBy && (
+            <button type="button" className="link-btn" disabled={busy} onClick={run(block)}>
               Block
             </button>
           )}

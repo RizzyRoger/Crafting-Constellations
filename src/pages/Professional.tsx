@@ -1,5 +1,5 @@
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
-import { ref, uploadBytes } from 'firebase/storage'
+import { getMetadata, ref, uploadBytes } from 'firebase/storage'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
@@ -8,6 +8,7 @@ import { Quiet } from '../components/Quiet'
 import { describeError } from '../lib/callables'
 import { db, LOCAL_BACKEND, storage } from '../lib/firebase'
 import { useDocData } from '../lib/live'
+import { applicationProblem, DOC_TYPES, openSlots, reapplyNote } from '../lib/proApplication'
 import type { ProApplication } from '../lib/types'
 
 const LICENSE_TYPES = [
@@ -20,9 +21,23 @@ const LICENSE_TYPES = [
   ['other', 'Other licensed role'],
 ] as const
 
-const ACCEPT = 'application/pdf,image/png,image/jpeg,image/webp'
-const MAX_BYTES = 10 * 1024 * 1024
-const SLOTS = ['doc-1', 'doc-2', 'doc-3', 'doc-4', 'doc-5']
+const ACCEPT = DOC_TYPES.join(',')
+
+// Slots an earlier attempt filled without reaching the application; the owner may read their own
+const storedSlots = async (uid: string, slots: string[]) => {
+  const found = await Promise.all(
+    slots.map((s) =>
+      getMetadata(ref(storage, `proDocs/${uid}/${s}`)).then(
+        () => true,
+        (e: unknown) => {
+          if ((e as { code?: string }).code === 'storage/object-not-found') return false
+          throw e
+        },
+      ),
+    ),
+  )
+  return slots.filter((_, i) => found[i])
+}
 
 export const Professional = () => {
   const { uid, claims, profile } = useMe()
@@ -39,20 +54,20 @@ export const Professional = () => {
   if (application.loading) return <Quiet>Opening…</Quiet>
 
   const existing = application.data
+  const listed = existing?.files ?? []
   // Uploads are write-once; a resubmission uses the slots still free
-  const freeSlots = SLOTS.filter((s) => !existing?.files.includes(s))
+  const freeSlots = openSlots(listed)
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setError(null)
-    if (files.length === 0) return setError('Add at least one document.')
-    if (files.length > freeSlots.length) return setError(`You can add ${freeSlots.length} more document(s).`)
-    const tooBig = files.find((f) => f.size > MAX_BYTES)
-    if (tooBig) return setError(`${tooBig.name} is over 10 MB.`)
-
     setBusy(true)
     try {
-      const names = freeSlots.slice(0, files.length)
+      const slots = files.length ? openSlots(listed, await storedSlots(uid, freeSlots)) : freeSlots
+      // Everything the rules check, before a refusal can strand an upload
+      const problem = applicationProblem({ legalName, licenseRegion, licenseNumber, files, listed, open: slots.length })
+      if (problem) return setError(problem)
+      const names = slots.slice(0, files.length)
       await Promise.all(files.map((file, i) => uploadBytes(ref(storage, `proDocs/${uid}/${names[i]}`), file, { contentType: file.type })))
       await setDoc(doc(db, `proApplications/${uid}`), {
         uid,
@@ -61,7 +76,7 @@ export const Professional = () => {
         licenseType,
         licenseRegion: licenseRegion.trim(),
         licenseNumber: licenseNumber.trim(),
-        files: [...(existing?.files ?? []), ...names],
+        files: [...listed, ...names],
         ...(statement.trim() ? { statement: statement.trim() } : {}),
         submittedAt: serverTimestamp(),
       })
@@ -98,7 +113,9 @@ export const Professional = () => {
       <>
         {head}
         <div className="banner">
-          <p className="pencil note">Thank you. Your application is with a moderator. You’ll find a note under “You” when it’s been reviewed.</p>
+          <p className="pencil note">
+            Thank you. Your application is with a moderator. You’ll find a note in <Link to="/notifications">Notifications</Link> when it’s been reviewed.
+          </p>
         </div>
       </>
     )
@@ -125,12 +142,14 @@ export const Professional = () => {
     )
   }
 
+  const again = reapplyNote(existing)
+
   return (
     <>
       {head}
-      {existing?.status === 'denied' && (
+      {again && (
         <div className="banner" style={{ marginBottom: 24 }}>
-          <p className="pencil note">Your last application wasn’t approved.{existing.reviewNote ? ` Note: ${existing.reviewNote}` : ''} You can apply again.</p>
+          <p className="pencil note">{again}</p>
         </div>
       )}
       <form className="form" onSubmit={submit} style={{ maxWidth: 560 }}>
@@ -162,13 +181,23 @@ export const Professional = () => {
           <textarea id="statement" rows={3} maxLength={1000} value={statement} onChange={(e) => setStatement(e.target.value)} />
         </div>
         <div className="field">
-          <label htmlFor="docs">Licence documents — PDF or image, up to {freeSlots.length}, 10 MB each</label>
-          <input id="docs" type="file" accept={ACCEPT} multiple onChange={(e) => setFiles([...(e.target.files ?? [])].slice(0, freeSlots.length))} />
+          <label htmlFor="docs">
+            {listed.length ? 'More licence documents (optional)' : 'Licence documents'} — PDF or image, up to {freeSlots.length}, 10 MB each
+          </label>
+          <input
+            id="docs"
+            type="file"
+            accept={ACCEPT}
+            multiple
+            disabled={freeSlots.length === 0}
+            onChange={(e) => setFiles([...(e.target.files ?? [])].slice(0, freeSlots.length))}
+          />
           {files.length > 0 && <span className="hint">{files.map((f) => f.name).join(', ')}</span>}
+          {files.length === 0 && listed.length > 0 && <span className="hint">The documents you sent before stay with your application.</span>}
         </div>
         {error && <p className="error">{error}</p>}
         <div className="row">
-          <button type="submit" className="act act--wash" disabled={busy || freeSlots.length === 0}>
+          <button type="submit" className="act act--wash" disabled={busy}>
             {busy ? 'Sending…' : 'Send for review'}
           </button>
         </div>

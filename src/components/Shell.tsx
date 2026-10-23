@@ -3,9 +3,12 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useSignOut } from '../auth/useSignOut'
+import { personAddress } from '../constellation/personAddress'
+import { CHOOSE } from '../constellation/sheetReveal'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import { otherInPair } from '../lib/pair'
+import { visibleById, waitingOn } from '../lib/people'
 import type { Chat, Connection, Group, Membership, Notice, Profile } from '../lib/types'
 import { Blot } from '../wash/Blot'
 
@@ -77,7 +80,16 @@ const Rail = () => {
   const myGroupIds = new Set(memberships.data.map((m) => m.path.split('/')[1]))
   const myGroups = groups.data.filter((g) => myGroupIds.has(g.id)).sort((a, b) => a.name.localeCompare(b.name))
   const myChats = [...chats.data].sort((a, b) => a.name.localeCompare(b.name))
-  const incoming = connections.data.filter((c) => c.status === 'pending' && c.recipient === uid).length
+  // Who's asking to connect, read so anyone banned since drops out of the count (one `in` query holds 30)
+  const askerIds = useMemo(() => {
+    if (!uid) return []
+    const asking = connections.data.filter((c) => c.status === 'pending' && c.recipient === uid).map((c) => c.requester)
+    return [...new Set(asking)].sort().slice(0, 30)
+  }, [connections.data, uid])
+  const askers = useQueryData<Profile>(uid && askerIds.length ? `rail-askers|${askerIds.join(',')}` : null, () =>
+    query(collection(db, 'users'), where(documentId(), 'in', askerIds)),
+  )
+  const incoming = waitingOn(connections.data, visibleById(askers.data), uid ?? '').length
   const unread = notices.data.length + incoming
   const partnerIds = useMemo(() => {
     if (!uid) return []
@@ -118,7 +130,10 @@ const Rail = () => {
               <button
                 type="button"
                 onClick={() => {
-                  navigate(`/constellation?person=${person.id}`)
+                  // Marked as a choice, so choosing whoever is open already still brings their sheet
+                  // up; the same address again replaces itself rather than adding history
+                  const to = personAddress(location, person.id)
+                  navigate(to, { replace: to === location.pathname + location.search, state: CHOOSE })
                   setQueryText('')
                 }}
               >

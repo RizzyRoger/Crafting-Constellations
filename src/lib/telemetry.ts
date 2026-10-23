@@ -5,8 +5,11 @@ import { useSyncExternalStore } from 'react'
 import { app, USING_EMULATORS } from './firebase'
 
 // Counting visits (Analytics + Performance) is opt-in per device, off by default,
-// and never runs on the emulators. Pages are reported by route pattern
-// (/groups/:groupId), never by their real address; events carry fixed words only.
+// and never runs on the emulators. Analytics gets pages by route pattern
+// (/groups/:groupId), never their real address; events carry fixed words only.
+// Performance can't be told to do the same: it sends real addresses, which can hold
+// account, group, post and chat ids and a group's name (a private thread is
+// /messages/<uid>_<uid>), and the consent note says so.
 export const TELEMETRY_AVAILABLE = !USING_EMULATORS && Boolean(import.meta.env.VITE_FIREBASE_MEASUREMENT_ID)
 
 type Choice = 'yes' | 'no' | null
@@ -74,7 +77,8 @@ const counting = () => TELEMETRY_AVAILABLE && choice === 'yes'
 const logPage = async () => {
   if (!counting() || !page) return
   const { analytics, instance } = await start()
-  if (!instance) return
+  // A "no" (here or from another tab) can land while the services load
+  if (!instance || !counting()) return
   analytics.setDefaultEventParameters({ ...page })
   analytics.logEvent(instance, 'page_view', page)
 }
@@ -90,17 +94,13 @@ const clearAnalyticsCookies = () => {
     .forEach((name) => domains.forEach((d) => (document.cookie = `${name}=; Max-Age=0; path=/${d ? `; domain=${d}` : ''}`)))
 }
 
-export const setCountVisits = async (yes: boolean) => {
-  choice = yes ? 'yes' : 'no'
-  try {
-    localStorage.setItem(KEY, choice)
-  } catch {
-    // Remembered for this visit only
-  }
+// Brings this tab in line with the device's answer; anything but "yes" stops counting
+const applyChoice = async (next: Choice) => {
+  choice = next
   listeners.forEach((listener) => listener())
   if (!TELEMETRY_AVAILABLE) return
 
-  if (yes) {
+  if (next === 'yes') {
     const { analytics, instance, perf } = await start()
     perf.dataCollectionEnabled = true
     perf.instrumentationEnabled = true
@@ -108,7 +108,6 @@ export const setCountVisits = async (yes: boolean) => {
       analytics.setConsent({ analytics_storage: 'granted' })
       analytics.setAnalyticsCollectionEnabled(instance, true)
     }
-    await logPage()
     return
   }
 
@@ -121,6 +120,26 @@ export const setCountVisits = async (yes: boolean) => {
     analytics.setConsent({ analytics_storage: 'denied' })
   }
   clearAnalyticsCookies()
+}
+
+export const setCountVisits = async (yes: boolean) => {
+  const next = yes ? 'yes' : 'no'
+  try {
+    localStorage.setItem(KEY, next)
+  } catch {
+    // Remembered for this visit only
+  }
+  await applyChoice(next)
+  // The page they answered on counts; other tabs wait for their next page
+  if (yes) await logPage()
+}
+
+// The answer covers the device: follow one given in another tab (or cleared site data),
+// so "no" stops every open tab, not just this one. No window in node tests
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key === KEY || event.key === null) void applyChoice(readChoice())
+  })
 }
 
 export const trackPage = (pattern: string) => {
@@ -137,7 +156,7 @@ interface Events {
 
 export const track = <K extends keyof Events>(name: K, params: Events[K]) => {
   if (!counting()) return
-  void start().then(({ analytics, instance }) => instance && analytics.logEvent(instance, name as string, params))
+  void start().then(({ analytics, instance }) => instance && counting() && analytics.logEvent(instance, name as string, params))
 }
 
 export const trackSignIn = (credential: UserCredential, method: 'password' | 'google') =>

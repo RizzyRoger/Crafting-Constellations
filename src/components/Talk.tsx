@@ -3,6 +3,7 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { db } from '../lib/firebase'
 import { useLiveContent } from '../lib/live'
 import type { Message } from '../lib/types'
+import { Arrivals } from './Arrivals'
 import { Composer, type Mentionable } from './Composer'
 import { ConfirmEmail } from './ConfirmEmail'
 import { HostNote } from './HostNote'
@@ -55,7 +56,8 @@ export const Talk = ({
 
   return (
     <div className="stage">
-      <div className="chat" aria-live="polite" aria-label={label}>
+      {/* Not live: it opens with its whole history. Arrivals says what's new */}
+      <div className="chat" role="region" aria-label={label}>
         {messages.data.length === 0 && !messages.loading &&
           (host ? (
             <HostNote
@@ -73,6 +75,7 @@ export const Talk = ({
         ))}
         <div ref={end} />
       </div>
+      <Arrivals items={messages.data} opening={!messages.synced} me={me} />
       {verified ? (
         <Composer
           shape="bar"

@@ -9,8 +9,10 @@ import { Who } from '../components/Who'
 import { describeError } from '../lib/callables'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
+import { inBatches, withUnseen } from '../lib/noticeList'
 import { linkFor, placeOf, verbFor } from '../lib/notifications'
 import { otherInPair } from '../lib/pair'
+import { visibleById, waitingOn } from '../lib/people'
 import { acceptConnection, removeConnection } from '../lib/social'
 import { ago } from '../lib/time'
 import type { Chat, Connection, Content, Group, Notice, Profile } from '../lib/types'
@@ -25,6 +27,9 @@ const NOTE_TEXT: Partial<Record<Notice['type'], string>> = {
 }
 
 const EXCERPT = 160
+
+// The newest notices loaded at once; unseen ones older than these follow, up to as many again
+const PAGE = 50
 
 type Pointed = Content & { title?: string; body?: string; text?: string }
 
@@ -76,7 +81,7 @@ const NoticeRow = ({ notice, me, placeName, readable }: RowProps) => {
     )
   }
 
-  const href = linkFor(notice, me)
+  const href = linkFor(notice, me, readable)
   const body = (
     <>
       <span className="notice__line">
@@ -112,7 +117,11 @@ export const Notifications = () => {
   const [error, setError] = useState<string | null>(null)
 
   const notices = useQueryData<Notice>(`notices|${uid}`, () =>
-    query(collection(db, `users/${uid}/notices`), orderBy('createdAt', 'desc'), limit(50)),
+    query(collection(db, `users/${uid}/notices`), orderBy('createdAt', 'desc'), limit(PAGE)),
+  )
+  // Every unseen one, as the rail counts them, so none can be left past the newest page
+  const unseen = useQueryData<Notice>(`unseen-notices|${uid}`, () =>
+    query(collection(db, `users/${uid}/notices`), where('seen', '==', false)),
   )
   const connections = useQueryData<Connection>(`connections|${uid}`, () =>
     query(collection(db, 'connections'), where('uids', 'array-contains', uid)),
@@ -122,12 +131,12 @@ export const Notifications = () => {
   const chats = useQueryData<Chat>(verified ? `chats|${uid}` : null, () => query(collection(db, 'chats'), where('uids', 'array-contains', uid)))
   const memberships = useQueryData<{ path: string }>(`my-members|${uid}`, () => query(collectionGroup(db, 'members'), where('uid', '==', uid)))
 
-  const byId = new Map(people.data.map((p) => [p.id, p]))
+  const byId = visibleById(people.data)
   const groupNames = new Map(groups.data.map((g) => [g.id, g.name]))
   const chatNames = new Map(chats.data.map((c) => [c.id, c.name]))
-  const incoming = connections.data.filter((c) => c.status === 'pending' && c.recipient === uid)
-  const unseen = notices.data.filter((n) => !n.seen)
-  const loading = notices.loading || connections.loading
+  const incoming = waitingOn(connections.data, byId, uid)
+  const listed = withUnseen(notices.data, unseen.data, PAGE)
+  const loading = notices.loading || unseen.loading || connections.loading
 
   const myGroupIds = new Set(memberships.data.map((m) => m.path.split('/')[1]))
 
@@ -157,11 +166,14 @@ export const Notifications = () => {
     }
   }
 
-  const markAllRead = async () => {
-    const batch = writeBatch(db)
-    unseen.forEach((n) => batch.update(doc(db, `users/${uid}/notices/${n.id}`), { seen: true }))
-    await batch.commit()
-  }
+  const markAllRead = () =>
+    Promise.all(
+      inBatches(unseen.data).map((part) => {
+        const batch = writeBatch(db)
+        part.forEach((n) => batch.update(doc(db, `users/${uid}/notices/${n.id}`), { seen: true }))
+        return batch.commit()
+      }),
+    )
 
   return (
     <>
@@ -210,17 +222,17 @@ export const Notifications = () => {
       <section className="section" aria-labelledby="latest">
         <div className="section__head">
           <h2 id="latest">Latest</h2>
-          {unseen.length > 0 && (
+          {unseen.data.length > 0 && (
             <button type="button" className="link-btn" disabled={busy === 'all'} onClick={run('all', markAllRead)}>
               Mark all read
             </button>
           )}
         </div>
-        {loading ? null : notices.data.length === 0 ? (
+        {loading ? null : listed.length === 0 ? (
           <p className="empty">Nothing yet. When someone mentions you, comments on your post, or accepts your request, it shows here.</p>
         ) : (
           <ul className="ruled-list">
-            {notices.data.map((n) => (
+            {listed.map((n) => (
               <NoticeRow key={n.id} notice={n} me={uid} placeName={placeName(n)} readable={readable(n)} />
             ))}
           </ul>

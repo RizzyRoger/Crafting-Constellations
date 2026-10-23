@@ -29,6 +29,14 @@ describe('linkFor', () => {
     expect(linkFor({ type: 'accepted', actorUid: 'a' }, 'b')).toBe('/messages/a_b')
   })
 
+  it('has nothing to open in a chat you have left, but still opens a group you have left', () => {
+    expect(linkFor({ type: 'mention', contentPath: 'chats/c/messages/m' }, 'me', false)).toBeNull()
+    expect(linkFor({ type: 'mention', contentPath: 'chats/c/messages/m' }, 'me', true)).toBe('/chats/c')
+    expect(linkFor({ type: 'mention', contentPath: 'chats/c/messages/m' }, 'me', undefined)).toBe('/chats/c')
+    expect(linkFor({ type: 'mention', contentPath: 'groups/g/messages/m' }, 'me', false)).toBe('/groups/g')
+    expect(linkFor({ type: 'mention', contentPath: 'groups/g/posts/p' }, 'me', false)).toBe('/groups/g/posts/p')
+  })
+
   it('has nothing to open for notes from moderators', () => {
     expect(linkFor({ type: 'held', contentPath: 'groups/g/posts/p' }, 'me')).toBeNull()
     expect(linkFor({ type: 'proApproved' }, 'me')).toBeNull()

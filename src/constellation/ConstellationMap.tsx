@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Profile } from '../lib/types'
-import { layoutConstellation, type LayoutInput } from './layout'
+import { layoutConstellation, NODE, starDisc, type LayoutInput } from './layout'
 import { useBlotUrls } from './useBlotUrls'
 
 interface MapProps extends Omit<LayoutInput, 'width' | 'people'> {
@@ -12,8 +12,6 @@ interface MapProps extends Omit<LayoutInput, 'width' | 'people'> {
   selected: string | null
   onSelect: (uid: string) => void
 }
-
-const NODE = 28
 
 // Groups are pencil circles, people are wash blots, friendships are pencil lines
 export const ConstellationMap = ({ constellations, groups, memberships, people, lines: friendLines, me, myGroupIds, selected, onSelect }: MapProps) => {
@@ -113,7 +111,7 @@ export const ConstellationMap = ({ constellations, groups, memberships, people, 
             const person = byId.get(p.uid)
             if (!person) return null
             const isMe = p.uid === me
-            const size = isMe ? NODE + 10 : NODE
+            const { size, hit } = starDisc(p.size, isMe)
             const showName = isMe || selected === p.uid || hover === p.uid
             return (
               <g
@@ -130,7 +128,7 @@ export const ConstellationMap = ({ constellations, groups, memberships, people, 
                 onFocus={() => setHover(p.uid)}
                 onBlur={() => setHover(null)}
               >
-                <circle r={size / 2 + 6} className="chart__hit" />
+                <circle r={hit} className="chart__hit" />
                 {(isMe || selected === p.uid) && <circle r={size / 2 + 4} className="chart__ring" filter="url(#pencil)" />}
                 {person.pro && <circle r={size / 2 + 2} className="chart__pro" />}
                 {urls[p.uid] ? (
