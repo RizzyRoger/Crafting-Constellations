@@ -66,7 +66,7 @@ npm run test:local-backend
 - `npm test` covers the moderation rules, the constellation layout, the account-deletion rules, and helpers.
 - `npm run test:rules` runs the Firestore and Storage security rules against the emulators.
 - `npm run test:e2e` runs account deletion (function, triggers, Storage), a moderator's profile reset, a moderator's licence review, removing a moderator (in the app and with `grant-admin`), and chat and group names end to end against the emulators.
-- `npm run test:local-backend` runs the local backend (below) against the emulators, with no Functions emulator, plus a rename racing a moderator's profile reset and reporting rounds after a moderator's decision.
+- `npm run test:local-backend` runs the local backend (below) against the emulators, with no Functions emulator, including how it copes when stopped mid-call, when Auth fails, or with no Storage; plus a rename racing a moderator's profile reset and reporting rounds after a moderator's decision.
 
 Stop `npm run emulators` before the last three; they use the same ports.
 
@@ -179,7 +179,7 @@ While the project can't use Cloud Functions, a small program on our own machine 
 - **How the site reaches it:** with `VITE_LOCAL_BACKEND=true`, the site writes each call (pen name, admin actions, account deletion) to `calls/{id}`. The backend runs the same callable code and writes the answer back. The rules check the caller and their sign-in time.
 - **What else it does:** it watches Firestore for what the triggers did (moderating new writing, reports, friendships, counters).
 - **No inbound ports:** it only makes outgoing connections, so no ports, tunnel or domain are needed.
-- **Restarts:** after a restart, it catches up on anything that arrived while it was off.
+- **Restarts:** stopping lets calls under way finish (up to 60s) and answers any still going as interrupted, so the site stops waiting. After a restart, it catches up on anything that arrived while it was off.
 - **Not available:** licence uploads need Storage, so they're paused (the Professional page says so).
 
 **On the NUC** (Linux, Node 22):

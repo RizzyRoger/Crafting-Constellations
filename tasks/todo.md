@@ -31,6 +31,28 @@ Baseline: typecheck, functions build, unit 133, rules 48, deleteAccount e2e 5, l
   - removing a moderator revokes their sign-in, with no new rules lookup (the delay that remains is documented);
   - Performance Monitoring's addresses are described truthfully.
 
+### Round 2 (after merging main's daily check-in, e1fd46a)
+
+- 17 finders (round 1's areas, main's check-in, and one reading round 1's whole diff for regressions), told everything already judged: 94 raw findings → 57 unique → 51 confirmed, 6 refuted.
+- About a quarter are main's new daily check-in (a refused listener on the auto-join, leaving undone at once, answers going to a group nobody is told about, the prompt collapsing conversation pages); the rest are follow-ons to round 1's fixes and smaller things round 1 didn't reach.
+- Refuted, and left as they are:
+  - the check-in group exists only where the seed makes it (a documented manual step for the live project);
+  - "Not now" on the check-in lasts for the visit (designed that way);
+  - naming a crisis line counts as crisis language (the documented policy);
+  - a spaced "Md" in a pen name reads as a title;
+  - catch-up after a restart judges one note per person slightly out of order (not worth the complexity);
+  - an unrefreshable token at page open (the SDK keeps the user; no visible harm).
+- Fixed in 18 groups, the same way as round 1; all 18 approved, a few with parts left in files the group didn't own.
+  - Reviewers' leftovers became follow-ups G1–G11, three of them required:
+    - `moderate.ts` must read contact details from the new `digits` view (9 tests red until then);
+    - the rules must accept a reapplication's document folder;
+    - the site must know the new "paused" approval outcome.
+  - Also decided: names that start with dotted initials ("D.R. Patel") are ordinary names; a trailing credential or a "Dr" title is still refused.
+- Decisions made:
+  - leaving Daily check-in lasts until the next visit;
+  - the check-in form says who reads the answers;
+  - the prompt stays off pages that fill the shell, or stays out of their way.
+
 ## Notifications, @mentions, seamless paper, draggable chart (2026-10-10)
 
 Plan: `/Users/darren/.claude/plans/i-want-you-to-quiet-stardust.md`
