@@ -261,6 +261,9 @@ service cloud.firestore {
     }
 
     // ---------- professional applications ----------
+    // A slot, or a reapplication's slot in the folder named for the decision it answers
+    // (storage.rules); the folder is a whole millisecond count
+    function docName(f) { return f is string && f.matches('([0-9]{1,16}/)?doc-[1-5]'); }
     function appFieldsValid() {
       let d = nd();
       return isStr(d.legalName, 2, 120)
@@ -269,7 +272,12 @@ service cloud.firestore {
         && isStr(d.licenseRegion, 2, 80)
         && isStr(d.licenseNumber, 2, 60)
         && d.files is list && d.files.size() >= 1 && d.files.size() <= 5
-        && d.files.hasOnly(['doc-1', 'doc-2', 'doc-3', 'doc-4', 'doc-5'])
+        // Rules can't loop, so each of the five places is checked in turn
+        && docName(d.files[0])
+        && (d.files.size() < 2 || docName(d.files[1]))
+        && (d.files.size() < 3 || docName(d.files[2]))
+        && (d.files.size() < 4 || docName(d.files[3]))
+        && (d.files.size() < 5 || docName(d.files[4]))
         && (!('statement' in d) || isStr(d.statement, 0, 1000))
         && d.status == 'submitted'
         && d.submittedAt == request.time;

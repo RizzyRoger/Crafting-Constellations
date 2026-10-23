@@ -542,9 +542,52 @@ describe('professional applications', () => {
     }
   })
 
+  // A reapplication's new documents go in a folder named for the decision (reapplyRound)
+  const ROUND = '1729700000123'
+  const SLOTS = ['doc-1', 'doc-2', 'doc-3', 'doc-4', 'doc-5']
+
+  it('a reapplication can send documents in its folder, alone or with the ones sent before', async () => {
+    for (const status of ['denied', 'revoked']) {
+      for (const files of [
+        [`${ROUND}/doc-1`],
+        ['doc-1', `${ROUND}/doc-1`],
+        ['doc-1', 'doc-2', 'doc-3', 'doc-4', `${ROUND}/doc-5`],
+        // Sent after an earlier reapplication
+        [`${ROUND}/doc-1`, '1729800000456/doc-1'],
+      ]) {
+        await reviewed(status)
+        await assertSucceeds(setDoc(doc(alice(), 'proApplications/alice'), { ...application, files }))
+      }
+    }
+    // A first application still names plain slots
+    await assertSucceeds(setDoc(doc(carl(), 'proApplications/carl'), { ...application, uid: 'carl', files: SLOTS }))
+  })
+
+  it('document names stay slots, five at most', async () => {
+    await reviewed('denied')
+    await assertFails(setDoc(doc(carl(), 'proApplications/carl'), { ...application, uid: 'carl', files: ['doc-6'] }))
+    for (const files of [
+      [`${ROUND}/doc-6`],
+      ['doc-0'],
+      ['abc/doc-1'],
+      ['../x/doc-1'],
+      [`${ROUND}/doc-1/x`],
+      [`a${ROUND}/doc-1`],
+      [`/${ROUND}/doc-1`],
+      ['doc-1', 7],
+      [],
+      [...SLOTS, `${ROUND}/doc-1`],
+      // A bad name in each place a list can have
+      ...SLOTS.map((_, i) => [...SLOTS.slice(0, i), 'abc/doc-1']),
+    ]) {
+      await assertFails(setDoc(doc(alice(), 'proApplications/alice'), { ...application, files }))
+    }
+  })
+
   it('a resubmission never sets or keeps the review, and an approved one stays put', async () => {
     await reviewed('denied')
     await assertFails(setDoc(doc(alice(), 'proApplications/alice'), { ...application, reviewNote: 'Looks fine' }))
+    await assertFails(setDoc(doc(alice(), 'proApplications/alice'), { ...application, files: [`${ROUND}/doc-1`], reviewNote: 'Looks fine' }))
     await assertFails(setDoc(doc(alice(), 'proApplications/alice'), { ...application, reviewedBy: 'alice', reviewedAt: serverTimestamp() }))
     await assertFails(updateDoc(doc(alice(), 'proApplications/alice'), { status: 'submitted', submittedAt: serverTimestamp() }))
     await reviewed('approved')

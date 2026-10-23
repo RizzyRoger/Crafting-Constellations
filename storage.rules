@@ -1,7 +1,8 @@
 rules_version = '2';
 
 // Crafting Constellations — Storage rules
-// Professional license documents only: write-once, owner + admin read.
+// Professional license documents only: owner + admin read. Nothing a moderator may be
+// reviewing or has reviewed can be written again (see the two matches below).
 // Admins read with getBlob()/getBytes(), never a download URL (those bypass rules).
 
 service firebase.storage {
@@ -13,19 +14,40 @@ service firebase.storage {
       return claim('banned') != true
         && !firestore.exists(/databases/(default)/documents/bans/$(request.auth.uid));
     }
-
-    match /proDocs/{ownerUid}/{fileName} {
-      allow get: if signedIn() && (request.auth.uid == ownerUid || isAdmin());
-      // resource == null: write-once even where an overwrite is evaluated as create
-      allow create: if signedIn() && request.auth.uid == ownerUid
-        && resource == null
+    function application(uid) { return /databases/(default)/documents/proApplications/$(uid); }
+    function canUpload(ownerUid, fileName) {
+      return signedIn() && request.auth.uid == ownerUid
         && claim('email_verified') == true
         && notBanned()
         && fileName.matches('doc-[1-5]')
         && request.resource.size > 0
         && request.resource.size <= 10 * 1024 * 1024
         && request.resource.contentType.matches('application/pdf|image/(png|jpeg|webp)');
-      allow list, update, delete: if false;
+    }
+    // A reapplication's folder is named for the decision it answers (its reviewedAt), so each
+    // decision opens five fresh slots, only while it stands, and never one the application lists
+    function inRound(ownerUid, round, fileName) {
+      let app = firestore.get(application(ownerUid)).data;
+      return app.status in ['denied', 'revoked']
+        && round == string(app.reviewedAt.toMillis())
+        && !((round + '/' + fileName) in app.files);
+    }
+
+    match /proDocs/{ownerUid}/{fileName} {
+      allow get: if signedIn() && (request.auth.uid == ownerUid || isAdmin());
+      // Write-once once there's an application (resource == null, even where an overwrite is
+      // evaluated as create). Before that no moderator has seen any, so a failed try can be redone
+      allow create, update: if canUpload(ownerUid, fileName)
+        && (resource == null || !firestore.exists(application(ownerUid)));
+      allow list, delete: if false;
+    }
+
+    // A turned-down or revoked applicant's new documents, which can be redone until they're sent.
+    // Account deletion's purge (prefix proDocs/{uid}/) takes these too
+    match /proDocs/{ownerUid}/{round}/{fileName} {
+      allow get: if signedIn() && (request.auth.uid == ownerUid || isAdmin());
+      allow create, update: if canUpload(ownerUid, fileName) && inRound(ownerUid, round, fileName);
+      allow list, delete: if false;
     }
   }
 }
