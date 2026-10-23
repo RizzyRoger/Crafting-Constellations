@@ -33,7 +33,7 @@ export const kindOf = (path: string): ContentKind | null => {
   return null
 }
 
-export const queueIdFor = (path: string) => path.replaceAll('/', '~')
+export { queueIdFor } from './queueId.js'
 
 export const textOf = (data: FirebaseFirestore.DocumentData | undefined) =>
   [data?.title, data?.body ?? data?.text].filter((v): v is string => typeof v === 'string').join('\n')

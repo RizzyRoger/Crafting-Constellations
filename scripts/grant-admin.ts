@@ -1,5 +1,5 @@
 /*
- * Grants (or removes) the admin claim. Emulator by default.
+ * Grants (or removes) the admin claim; removing it also ends their sessions. Emulator by default.
  *   npm run grant-admin -- --email you@example.test
  *   npm run grant-admin -- --uid abc123 --remove
  * For a real project: set GOOGLE_APPLICATION_CREDENTIALS, then add --prod --project <id>.
@@ -27,8 +27,16 @@ const main = async () => {
   const user = email ? await auth.getUserByEmail(email) : uid ? await auth.getUser(uid) : undefined
   if (!user) throw new Error('Pass --email or --uid.')
   const admin = !args.includes('--remove')
+  const was = user.customClaims?.admin === true
   await auth.setCustomUserClaims(user.uid, { ...(user.customClaims ?? {}), admin })
-  console.log(`${admin ? 'Granted' : 'Removed'} admin for ${user.uid}. They need to sign out and in (or refresh) to see it.`)
+  if (admin) {
+    console.log(`Granted admin for ${user.uid}. They need to sign out and in (or refresh) to see it.`)
+    return
+  }
+  // As Review → People → Remove moderator does (setAdmin): their tokens say admin until they
+  // expire, so end their sessions and each device signs in again without the role
+  if (was) await auth.revokeRefreshTokens(user.uid)
+  console.log(was ? `Removed admin for ${user.uid} and signed them out everywhere.` : `${user.uid} was not an admin. Nothing to remove.`)
 }
 
 main().catch((error) => {

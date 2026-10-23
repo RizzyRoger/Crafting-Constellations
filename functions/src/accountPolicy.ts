@@ -5,7 +5,8 @@ import { tidyPenName } from './moderation/index.js'
 // Deleting needs a fresh sign-in: seconds since the ID token's auth_time
 export const RECENT_SIGN_IN_SECONDS = 5 * 60
 
-export const isRecentSignIn = (authTime: unknown, nowSeconds = Date.now() / 1000) =>
+// `nowSeconds` is the server's time, not this machine's: the local backend's clock may be off
+export const isRecentSignIn = (authTime: unknown, nowSeconds: number) =>
   typeof authTime === 'number' && nowSeconds - authTime <= RECENT_SIGN_IN_SECONDS
 
 // Someone who never finished onboarding has no pen name, so they type this instead

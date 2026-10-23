@@ -21,7 +21,8 @@ const deleteTrees = async (refs: DocumentReference[]) => {
 }
 
 // Everything a person leaves behind, except moderation evidence (bans, the
-// audit log, reports others filed). Safe to run again after a partial failure.
+// audit log, reports others filed, pen names a moderator retired: those hold
+// no uid, so they stay blocked). Safe to run again after a partial failure.
 export const purgeAccount = async (uid: string) => {
   // 1. Cut off writing first: rules need a membership, a connection, a chat seat or a profile
   const [memberships, connections, friendships, penNames, threadDocs, chats] = await Promise.all([
@@ -101,7 +102,8 @@ export const deleteAccount = onCall<{ confirm?: string }>(
 
     const [user, profile, ban] = await Promise.all([auth.getUser(uid), db.doc(`users/${uid}`).get(), db.doc(`bans/${uid}`).get()])
     if (user.customClaims?.admin === true) throw new HttpsError('failed-precondition', 'admin', { problem: 'admin' })
-    if (!isRecentSignIn(request.auth?.token.auth_time)) throw new HttpsError('failed-precondition', 'recent-login', { problem: 'recent-login' })
+    // Timed on the server's clock (the read time), like auth_time: the local backend's may be off
+    if (!isRecentSignIn(request.auth?.token.auth_time, profile.readTime.toMillis() / 1000)) throw new HttpsError('failed-precondition', 'recent-login', { problem: 'recent-login' })
     if (ban.exists) throw new HttpsError('permission-denied', 'paused', { problem: 'paused' })
     if (!confirmMatches(request.data?.confirm, profile.data()?.penNameLower)) {
       throw new HttpsError('invalid-argument', 'confirm', { problem: 'confirm' })

@@ -1,5 +1,6 @@
 /*
  * deleteAccount end to end: the real function and triggers on the emulators.
+ * Also a moderator's Reset profile, whose retired name has to outlast the account.
  * Run with `npm run test:e2e` (stop `npm run emulators` first).
  *
  * Every test seeds its own people, group and thread under fresh ids instead of
@@ -28,6 +29,9 @@ const client = initializeApp({ apiKey: 'demo-key', projectId: PROJECT_ID, authDo
 const auth = getAuth(client)
 const functions = getFunctions(client, 'us-central1')
 const deleteAccount = httpsCallable<{ confirm?: string }, { ok: true }>(functions, 'deleteAccount')
+const saveProfile = httpsCallable<{ penName?: string }, { ok: true }>(functions, 'saveProfile')
+const removeContent = httpsCallable<{ queueId: string }, { ok: true }>(functions, 'removeContent')
+const approveContent = httpsCallable<{ queueId: string }, { ok: true }>(functions, 'approveContent')
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -42,7 +46,8 @@ const eventually = async (check: () => Promise<boolean>, what: string) => {
 
 const exists = async (path: string) => (await db.doc(path).get()).exists
 const field = async (path: string, name: string) => (await db.doc(path).get()).get(name)
-const queueDoc = (path: string) => `modQueue/${path.replaceAll('/', '~')}`
+const queueId = (path: string) => path.replaceAll('/', '~')
+const queueDoc = (path: string) => `modQueue/${queueId(path)}`
 
 // Ports come from emulators:exec (env and the hub), so this also runs beside another emulator set
 const connectClient = async () => {
@@ -266,5 +271,72 @@ describe('deleteAccount', () => {
     await expect(deleteAccount({ confirm: 'delete' })).resolves.toMatchObject({ data: { ok: true } })
     await expect(adminAuth.getUser(w.leaver)).rejects.toMatchObject({ code: 'auth/user-not-found' })
     expect(await exists(`penNames/leaving lark ${w.n}`)).toBe(false)
+  })
+})
+
+describe('Reset profile', () => {
+  // The name and mark the triggers put on writing as it goes out, and on the notices it causes
+  const signed = (penName: string, uid: string) => ({ penName, avatarSeed: uid, pigment: 'graphite', pro: false })
+
+  // The leaver's writing carries their name, one post of theirs is held, and their profile is reported
+  const reported = async () => {
+    const w = await seed()
+    const { leaver, friend, mod, pair, g, n } = w
+    const theirs = [`${g}/posts/lp`, `${g}/posts/fp/comments/lc`, `${g}/messages/lm`, `dms/${pair}/messages/m1`, `chats/c-${n}/messages/lc`]
+    const held = `${g}/posts/held`
+    await Promise.all(theirs.map((path) => db.doc(path).update({ author: signed(w.leaverName, leaver) })))
+    await db.doc(`${g}/posts/fp`).update({ author: signed(w.friendName, friend) })
+    await db.doc(held).set({ authorUid: leaver, body: 'Hard day.', status: 'held', heldReason: 'review', createdAt: new Date(), author: signed(w.leaverName, leaver) })
+    await db.doc(queueDoc(held)).set({ contentPath: held, kind: 'post', groupId: `g-${n}`, authorUid: leaver, state: 'open' })
+    await db.doc(`users/${friend}/notices/from-leaver`).update({ actor: signed(w.leaverName, leaver) })
+    await db.doc(`users/${friend}/notices/from-mod`).update({ actor: signed(w.modName, mod) })
+    await db.doc(queueDoc(`users/${leaver}`)).set({ contentPath: `users/${leaver}`, kind: 'profile', authorUid: leaver, state: 'open' })
+    return { ...w, theirs, held }
+  }
+
+  // A moderator presses Reset profile; gives the name it handed out
+  const reset = async (w: { mod: string; leaver: string }): Promise<string> => {
+    await signInAs(w.mod)
+    await expect(removeContent({ queueId: queueId(`users/${w.leaver}`) })).resolves.toMatchObject({ data: { ok: true } })
+    return field(`users/${w.leaver}`, 'penName')
+  }
+
+  it('takes the reported name off everything they wrote and every notice they caused', async () => {
+    const w = await reported()
+    const fresh = await reset(w)
+    expect(fresh).not.toBe(w.leaverName)
+
+    for (const path of w.theirs) expect(await field(path, 'author'), path).toEqual(signed(fresh, w.leaver))
+    expect(await field(w.held, 'author')).toEqual(signed(fresh, w.leaver))
+    expect(await field(`users/${w.friend}/notices/from-leaver`, 'actor')).toEqual(signed(fresh, w.leaver))
+    // Nobody else's name moves
+    expect(await field(`${w.g}/posts/fp`, 'author.penName')).toBe(w.friendName)
+    expect(await field(`users/${w.friend}/notices/from-mod`, 'actor.penName')).toBe(w.modName)
+
+    // Writing held before the reset goes out under the new name
+    await expect(approveContent({ queueId: queueId(w.held) })).resolves.toMatchObject({ data: { ok: true } })
+    expect(await field(w.held, 'status')).toBe('published')
+    expect(await field(w.held, 'author.penName')).toBe(fresh)
+  })
+
+  it('retires the name: nobody can take it, them included, even once their account is gone', async () => {
+    const w = await reported()
+    const fresh = await reset(w)
+    const refused = { code: 'functions/invalid-argument', problem: 'unkind' }
+
+    await signInAs(w.leaver)
+    expect(await problemOf(saveProfile({ penName: w.leaverName }))).toEqual(refused)
+    expect(await problemOf(saveProfile({ penName: `leaving  LARK ${w.n}` }))).toEqual(refused)
+    expect(await field(`users/${w.leaver}`, 'penName')).toBe(fresh)
+    await signInAs(w.friend)
+    expect(await problemOf(saveProfile({ penName: w.leaverName }))).toEqual(refused)
+
+    // Leaving frees the name they had at the end. The retired one stays blocked, and nothing in it points back at them.
+    await signInAs(w.leaver)
+    await expect(deleteAccount({ confirm: fresh })).resolves.toMatchObject({ data: { ok: true } })
+    expect(await exists(`penNames/${fresh.toLowerCase()}`)).toBe(false)
+    expect((await db.doc(`penNames/leaving lark ${w.n}`).get()).data()).toEqual({ retired: true })
+    await signInAs(w.friend)
+    expect(await problemOf(saveProfile({ penName: w.leaverName }))).toEqual(refused)
   })
 })

@@ -6,7 +6,7 @@
  */
 import { deleteApp as deleteAdminApp, initializeApp as initializeAdminApp } from 'firebase-admin/app'
 import { getAuth as getAdminAuth } from 'firebase-admin/auth'
-import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore'
+import { FieldValue, getFirestore as getAdminFirestore, type DocumentReference } from 'firebase-admin/firestore'
 import { deleteApp, initializeApp } from 'firebase/app'
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import {
@@ -21,7 +21,7 @@ import {
   updateDoc,
   type DocumentData,
 } from 'firebase/firestore'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 const PROJECT_ID = 'demo-crafting-constellations'
 const PASSWORD = 'e2e-password-only-for-emulator'
@@ -84,9 +84,23 @@ const signInAs = async (uid: string) => {
   await signInWithEmailAndPassword(auth, `${uid}@example.test`, PASSWORD)
 }
 
-const notices = async (uid: string) => (await adminDb.collection(`users/${uid}/notices`).get()).docs.map((d) => ({ id: d.id, ...d.data() }))
+const notices = async (uid: string) =>
+  (await adminDb.collection(`users/${uid}/notices`).get()).docs.map((d): { id: string; [field: string]: unknown } => ({ id: d.id, ...d.data() }))
+
+const group = async (uids: string[]) => {
+  const g = `groups/notify-${++runs}`
+  await adminDb.doc(g).set({ name: 'Evening sheet', memberCount: 0 })
+  await Promise.all(uids.map((uid) => adminDb.doc(`${g}/members/${uid}`).set({ uid, joinedAt: new Date() })))
+  return g
+}
+
+const published = (path: string) => eventually(async () => (await field(path, 'status')) === 'published', `${path} to publish`)
+
+// Group talk written while the backend was off, one note every three minutes
+const BACKLOG = Array.from({ length: 12 }, (_, i) => `groups/backlog/messages/m${i + 1}`)
 
 let backend: { stop: () => void }
+let startBackend: () => Promise<{ stop: () => void }>
 
 beforeAll(async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST || !process.env.FIREBASE_AUTH_EMULATOR_HOST) {
@@ -106,9 +120,22 @@ beforeAll(async () => {
   await acceptedAgo('away-asker', 'away-answerer', 60 * 60_000)
   await acceptedAgo('old-asker', 'old-answerer', 30 * 24 * 60 * 60_000)
 
+  await adminDb.doc('users/backlog-writer').set({ penName: 'Slow Writer', avatarSeed: 'backlog-writer', pigment: 'graphite', pro: false, banned: false })
+  await Promise.all(
+    BACKLOG.map((path, i) =>
+      adminDb.doc(path).set({
+        authorUid: 'backlog-writer',
+        text: `Still up with Dad, note ${i + 1}.`,
+        status: 'pending',
+        createdAt: new Date(Date.now() - (BACKLOG.length - i) * 3 * 60_000),
+      }),
+    ),
+  )
+
   // @ts-expect-error built JS from the functions package (npm run functions:build)
   const { startLocalBackend } = await import('../../functions/lib/local-backend.js')
-  backend = await startLocalBackend()
+  startBackend = startLocalBackend
+  backend = await startBackend()
 })
 
 afterAll(async () => {
@@ -153,6 +180,45 @@ describe('local backend', () => {
     await expect(adminAuth.getUser(uid)).rejects.toMatchObject({ code: 'auth/user-not-found' })
   })
 
+  it('ages calls on the server’s clock, so a clock running ahead here expires nothing', async () => {
+    const uid = await person()
+    // The backend runs in this process: a whole minute ahead of the emulator's clock
+    vi.useFakeTimers({ now: Date.now() + 60_000, toFake: ['Date'], shouldAdvanceTime: true })
+    try {
+      expect(await callViaQueue('saveProfile', { penName: `Fast Clock ${runs}`, pigment: 'fresco' })).toMatchObject({ state: 'done' })
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(await field(`users/${uid}`, 'penName')).toBe(`Fast Clock ${runs}`)
+  })
+
+  it('lets someone who just signed in leave, with this clock ten minutes ahead of the server’s', async () => {
+    const uid = await person('Leaving Wren')
+    vi.useFakeTimers({ now: Date.now() + 10 * 60_000, toFake: ['Date'], shouldAdvanceTime: true })
+    try {
+      expect(await callViaQueue('deleteAccount', { confirm: 'leaving wren' })).toMatchObject({ state: 'done' })
+    } finally {
+      vi.useRealTimers()
+    }
+    await expect(adminAuth.getUser(uid)).rejects.toMatchObject({ code: 'auth/user-not-found' })
+  })
+
+  it('refuses a sign-in ten minutes old, with this clock ten minutes behind the server’s', async () => {
+    const uid = await person('Stale Sparrow')
+    // Queued past the rules, which would want a sign-in really made ten minutes ago
+    const ref = adminDb.collection('calls').doc()
+    const authTime = Math.floor(Date.now() / 1000) - 10 * 60
+    vi.useFakeTimers({ now: Date.now() - 10 * 60_000, toFake: ['Date'], shouldAdvanceTime: true })
+    try {
+      await ref.set({ uid, name: 'deleteAccount', data: { confirm: 'stale sparrow' }, authTime, state: 'new', createdAt: FieldValue.serverTimestamp() })
+      await eventually(async () => !['new', 'running'].includes((await ref.get()).get('state')), 'an answer to the call')
+    } finally {
+      vi.useRealTimers()
+    }
+    expect((await ref.get()).data()).toMatchObject({ state: 'failed', error: { details: { problem: 'recent-login' } } })
+    expect((await adminAuth.getUser(uid)).uid).toBe(uid)
+  })
+
   it('never runs a call that waited too long', async () => {
     const uid = await person()
     const ref = adminDb.collection('calls').doc()
@@ -179,17 +245,29 @@ describe('local backend', () => {
       'the like and comment counts',
     )
   })
+
+  it('paces writing from while it was off by when it was written, so a slow backlog isn’t held as a flood', async () => {
+    const statuses = async () => Promise.all(BACKLOG.map((path) => field(path, 'status')))
+    await eventually(async () => (await statuses()).every((status) => status !== 'pending'), 'the backlog to be moderated')
+    expect(await statuses()).toEqual(BACKLOG.map(() => 'published'))
+    expect((await adminDb.collection('modQueue').where('authorUid', '==', 'backlog-writer').get()).empty).toBe(true)
+  })
+
+  it('still holds a burst, judging one person’s notes in the order they were written', async () => {
+    await adminDb.doc('users/burst-writer').set({ penName: 'Fast Writer', avatarSeed: 'burst-writer', pigment: 'graphite', pro: false, banned: false })
+    // Twenty notes in the last twenty seconds, all arriving at once; ids run newest first
+    const written = Array.from({ length: 20 }, (_, i) => ({ path: `groups/burst/messages/m${String(20 - i).padStart(2, '0')}`, at: Date.now() - (20 - i) * 1000 }))
+    const batch = adminDb.batch()
+    written.forEach(({ path, at }, i) => batch.set(adminDb.doc(path), { authorUid: 'burst-writer', text: `Thinking of you all, ${i + 1}.`, status: 'pending', createdAt: new Date(at) }))
+    await batch.commit()
+    const statuses = async () => Promise.all(written.map(({ path }) => field(path, 'status')))
+    await eventually(async () => (await statuses()).every((status) => status !== 'pending'), 'the burst to be moderated')
+    expect(await statuses()).toEqual(written.map((_, i) => (i < 8 ? 'published' : 'held')))
+    expect((await adminDb.collection('modQueue').where('authorUid', '==', 'burst-writer').get()).size).toBe(12)
+  })
 })
 
 describe('notifications', () => {
-  const group = async (uids: string[]) => {
-    const g = `groups/notify-${++runs}`
-    await adminDb.doc(g).set({ name: 'Evening sheet', memberCount: 0 })
-    await Promise.all(uids.map((uid) => adminDb.doc(`${g}/members/${uid}`).set({ uid, joinedAt: new Date() })))
-    return g
-  }
-  const published = (path: string) => eventually(async () => (await field(path, 'status')) === 'published', `${path} to publish`)
-
   it('pings people picked with @ who can read it, and tells the post’s writer about a comment', async () => {
     const poster = await person('Willow')
     const fern = await person('Fern')
@@ -253,7 +331,7 @@ describe('notifications', () => {
 
     const moderator = await person('Night Owl')
     await adminAuth.setCustomUserClaims(moderator, { admin: true })
-    expect(await callViaQueue('approveContent', { queueId: path.replaceAll('/', '~') })).toMatchObject({ state: 'done' })
+    expect(await callViaQueue('approveContent', { queueId: path.replaceAll('/', '~') })).toMatchObject({ state: 'done', result: { ok: true, outcome: 'published' } })
 
     expect(await field(path, 'status')).toBe('published')
     expect(await field(path, 'mentioned')).toEqual([{ uid: fern, penName: 'Bracken' }])
@@ -264,6 +342,25 @@ describe('notifications', () => {
     await eventually(async () => (await notices('away-asker')).length === 1, 'the missed acceptance')
     expect((await notices('away-asker'))[0]).toMatchObject({ type: 'accepted', actorUid: 'away-answerer', seen: false })
     expect(await notices('old-asker')).toEqual([])
+  })
+
+  it('tells the person who reached out about an acceptance it first sees already accepted', async () => {
+    const asker = await person('Reacher')
+    const answerer = await person('Welcomer')
+    const uids = [asker, answerer].sort()
+    // Asked and answered while its listener was reconnecting: it never sees the request pending
+    await adminDb.doc(`connections/${uids.join('_')}`).set({
+      uids,
+      requester: asker,
+      recipient: answerer,
+      status: 'accepted',
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    })
+    await eventually(async () => (await notices(asker)).length === 1, 'the accepted notice')
+    expect((await notices(asker))[0]).toMatchObject({ type: 'accepted', actorUid: answerer, actor: { penName: 'Welcomer' }, seen: false })
+    expect(await notices(answerer)).toEqual([])
+    expect(await field(`friendships/${uids.join('_')}`, 'uids')).toEqual(uids)
   })
 
   it('tells the person who reached out, once, when their request is accepted', async () => {
@@ -290,5 +387,289 @@ describe('notifications', () => {
 
     expect((await notices(asker))[0]).toMatchObject({ type: 'accepted', actorUid: answerer, actor: { penName: 'Answerer' }, seen: false })
     expect(await notices(answerer)).toEqual([])
+  })
+})
+
+describe('friendships', () => {
+  const exists = async (path: string) => (await adminDb.doc(path).get()).exists
+
+  it('never brings back a line after a block when the acceptance is handled late', async () => {
+    const asker = await person('Kestrel')
+    const answerer = await person('Merlin')
+    const uids = [asker, answerer].sort()
+    const pairId = uids.join('_')
+    const connection = adminDb.doc(`connections/${pairId}`)
+    const friendship = `friendships/${pairId}`
+    // @ts-expect-error built JS from the functions package (npm run functions:build)
+    const { mirrorFriendship } = await import('../../functions/lib/friendships.js')
+    // Read with the functions package's own firebase-admin, so the event holds what the trigger gets
+    // @ts-expect-error built JS from the functions package (npm run functions:build)
+    const { db: functionsDb } = await import('../../functions/lib/app.js')
+
+    await signInAs(asker)
+    await setDoc(doc(db, connection.path), { uids, requester: asker, recipient: answerer, status: 'pending', createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+    const pending = await functionsDb.doc(connection.path).get()
+    await signInAs(answerer)
+    await updateDoc(doc(db, connection.path), { status: 'accepted', updatedAt: serverTimestamp() })
+    const accepted = await functionsDb.doc(connection.path).get()
+    await eventually(() => exists(friendship), 'the friendship')
+    expect((await adminDb.doc(friendship).get()).data()).toEqual({ uids, since: accepted.get('updatedAt') })
+
+    await updateDoc(doc(db, connection.path), { status: 'blocked', blockedBy: answerer, updatedAt: serverTimestamp() })
+    await eventually(async () => !(await exists(friendship)), 'the friendship to go')
+
+    // The acceptance's event arrives late (or is retried), still carrying "accepted"
+    await mirrorFriendship.run({ params: { pairId }, data: { before: pending, after: accepted } })
+    expect(await exists(friendship)).toBe(false)
+  })
+})
+
+describe('review queue', () => {
+  const queueId = (path: string) => path.replaceAll('/', '~')
+  const report = (path: string, reporterUids: string[]) =>
+    Promise.all(reporterUids.map((reporterUid) => adminDb.collection('reports').add({ reporterUid, contentPath: path, reason: 'harassment', createdAt: new Date() })))
+  const held = (path: string) => eventually(async () => (await field(path, 'status')) === 'held', `${path} to be held`)
+  const queued = (path: string) => eventually(async () => (await field(`modQueue/${queueId(path)}`, 'state')) === 'open', `${path} to be queued`)
+  // Signs in as a new moderator, who makes the calls that follow
+  const moderator = async () => {
+    const uid = await person('Night Owl')
+    await adminAuth.setCustomUserClaims(uid, { admin: true })
+    return uid
+  }
+  const removedNotices = async (uid: string) => (await notices(uid)).filter((notice) => notice.type === 'removed')
+
+  it('keeps up writing that reports hid without pinging anyone again, so read notices stay read', async () => {
+    const poster = await person('Alder')
+    const hazel = await person('Hazel')
+    const writer = await person('Rowan')
+    const reporters = [await person('Moss'), await person('Sedge'), await person('Teasel')]
+    const g = await group([poster, hazel, writer, ...reporters])
+    await adminDb.doc(`${g}/posts/p1`).set({ authorUid: poster, body: 'A long day.', status: 'published', createdAt: new Date() })
+
+    const path = `${g}/posts/p1/comments/c1`
+    await adminDb.doc(path).set({ authorUid: writer, text: '@Hazel thinking of you', mentions: [hazel], status: 'pending', createdAt: new Date() })
+    await published(path)
+    const sent = [`users/${hazel}/notices/mention~${queueId(path)}`, `users/${poster}/notices/comment~${queueId(path)}`]
+    await Promise.all(sent.map((notice) => adminDb.doc(notice).update({ seen: true })))
+    const read = await Promise.all(sent.map(async (notice) => (await adminDb.doc(notice).get()).data()))
+    const publishedAt = await field(path, 'publishedAt')
+
+    await report(path, reporters)
+    await held(path)
+    await moderator()
+    expect(await callViaQueue('approveContent', { queueId: queueId(path) })).toMatchObject({ state: 'done', result: { ok: true, outcome: 'restored' } })
+
+    expect(await field(path, 'status')).toBe('published')
+    expect(await field(path, 'publishedAt')).toEqual(publishedAt)
+    expect(await Promise.all(sent.map(async (notice) => (await adminDb.doc(notice).get()).data()))).toEqual(read)
+    expect(read.map((notice) => notice?.seen)).toEqual([true, true])
+  })
+
+  it('keeps up a chat line that reports hid without moving the chat on', async () => {
+    const writer = await person('Linnet')
+    const reporters = [await person('Wren'), await person('Finch'), await person('Siskin')]
+    const chat = `chats/chat-${runs}`
+    await adminDb.doc(chat).set({ name: 'Night shift', uids: [writer, ...reporters], createdBy: writer, createdAt: new Date(), lastMessageAt: null })
+    const path = `${chat}/messages/m1`
+    await adminDb.doc(path).set({ authorUid: writer, text: 'Long night here.', status: 'pending', createdAt: new Date() })
+    await published(path)
+    // Someone answers, so the chat's latest line is theirs
+    await adminDb.doc(`${chat}/messages/m2`).set({ authorUid: reporters[0], text: 'Same here.', status: 'pending', createdAt: new Date() })
+    await published(`${chat}/messages/m2`)
+    const latest = await adminDb.doc(chat).get()
+
+    await report(path, reporters)
+    await held(path)
+    await moderator()
+    expect(await callViaQueue('approveContent', { queueId: queueId(path) })).toMatchObject({ state: 'done' })
+
+    expect(await field(path, 'status')).toBe('published')
+    expect(await field(chat, 'lastAuthorUid')).toBe(reporters[0])
+    expect(await field(chat, 'lastMessageAt')).toEqual(latest.get('lastMessageAt'))
+  })
+
+  it('delivers a held private note while the two are connected, and never once one has blocked the other', async () => {
+    const writer = await person('Bramble')
+    const reader = await person('Clover')
+    const pairId = [writer, reader].sort().join('_')
+    await adminDb.doc(`connections/${pairId}`).set({ uids: pairId.split('_'), requester: writer, recipient: reader, status: 'accepted', createdAt: new Date(), updatedAt: new Date() })
+    const [first, second] = [`dms/${pairId}/messages/m1`, `dms/${pairId}/messages/m2`]
+    await adminDb.doc(first).set({ authorUid: writer, text: 'you are such a loser', status: 'pending', createdAt: new Date() })
+    await held(first)
+    await moderator()
+    expect(await callViaQueue('approveContent', { queueId: queueId(first) })).toMatchObject({ state: 'done', result: { ok: true, outcome: 'published' } })
+    expect(await field(first, 'status')).toBe('published')
+    const thread = (await adminDb.doc(`dms/${pairId}`).get()).data()
+    expect(thread).toMatchObject({ lastAuthorUid: writer })
+
+    await adminDb.doc(second).set({ authorUid: writer, text: 'you are such a loser', status: 'pending', createdAt: new Date() })
+    await held(second)
+    await adminDb.doc(`connections/${pairId}`).update({ status: 'blocked', blockedBy: reader, updatedAt: new Date() })
+    // The moderator is told it went nowhere, though it leaves the queue all the same
+    expect(await callViaQueue('approveContent', { queueId: queueId(second) })).toMatchObject({ state: 'done', result: { ok: true, outcome: 'undelivered' } })
+
+    expect(await field(second, 'status')).toBe('held')
+    expect((await adminDb.doc(`dms/${pairId}`).get()).data()).toEqual(thread)
+    expect(await field(`modQueue/${queueId(second)}`, 'state')).toBe('resolved')
+  })
+
+  it('tells the writer once, with the moderator’s note, however many times Remove is pressed', async () => {
+    const writer = await person('Thistle')
+    const reporter = await person('Yarrow')
+    const g = await group([writer, reporter])
+    const path = `${g}/posts/p1`
+    await adminDb.doc(path).set({ authorUid: writer, body: 'Call me any time.', status: 'published', createdAt: new Date() })
+    await report(path, [reporter])
+    await queued(path)
+
+    await moderator()
+    const note = '  Please keep phone numbers out of posts.  '
+    const calls = await Promise.all([1, 2].map(() => callViaQueue('removeContent', { queueId: queueId(path), note })))
+    expect(calls).toEqual([expect.objectContaining({ state: 'done' }), expect.objectContaining({ state: 'done' })])
+    // Whichever came second is told it changed nothing
+    expect(calls.map((call) => call.result.outcome).sort()).toEqual(['already-resolved', 'removed'])
+
+    expect(await field(path, 'status')).toBe('removed')
+    expect(await removedNotices(writer)).toEqual([
+      expect.objectContaining({ type: 'removed', contentPath: path, note: 'Please keep phone numbers out of posts.', seen: false }),
+    ])
+  })
+
+  it('tells a moderator who approves what another already removed that nothing changed, and changes nothing', async () => {
+    const writer = await person('Nettle')
+    const reporter = await person('Campion')
+    const g = await group([writer, reporter])
+    const path = `${g}/posts/p1`
+    await adminDb.doc(path).set({ authorUid: writer, body: 'Call me any time.', status: 'published', createdAt: new Date() })
+    await report(path, [reporter])
+    await queued(path)
+
+    const first = await moderator()
+    expect(await callViaQueue('removeContent', { queueId: queueId(path) })).toMatchObject({ state: 'done', result: { ok: true, outcome: 'removed' } })
+    // A second moderator, whose page still shows the entry
+    await moderator()
+    expect(await callViaQueue('approveContent', { queueId: queueId(path) })).toMatchObject({ state: 'done', result: { ok: true, outcome: 'already-resolved' } })
+
+    expect(await field(path, 'status')).toBe('removed')
+    expect((await adminDb.doc(`modQueue/${queueId(path)}`).get()).data()).toMatchObject({ state: 'resolved', resolution: 'removed', resolvedBy: first })
+  })
+
+  it('leaves held writing its writer withdrew as theirs, and tells them nothing', async () => {
+    const writer = await person('Burdock')
+    const g = await group([writer])
+    const path = `${g}/posts/p1`
+    await setDoc(doc(db, path), { authorUid: writer, body: 'you are such a loser', status: 'pending', createdAt: serverTimestamp() })
+    await held(path)
+    await updateDoc(doc(db, path), { status: 'withdrawn' })
+
+    await moderator()
+    expect(await callViaQueue('removeContent', { queueId: queueId(path), note: 'Not here.' })).toMatchObject({ state: 'done', result: { ok: true, outcome: 'withdrawn' } })
+
+    expect(await field(path, 'status')).toBe('withdrawn')
+    expect(await field(`modQueue/${queueId(path)}`, 'state')).toBe('resolved')
+    expect(await removedNotices(writer)).toEqual([])
+  })
+
+  it('resets a reported profile once, however many times Reset is pressed', async () => {
+    const owner = await person('Loud Name')
+    const reporter = await person('Quiet Reader')
+    await report(`users/${owner}`, [reporter])
+    await queued(`users/${owner}`)
+
+    await moderator()
+    const calls = await Promise.all([1, 2].map(() => callViaQueue('removeContent', { queueId: queueId(`users/${owner}`) })))
+    expect(calls).toEqual([expect.objectContaining({ state: 'done' }), expect.objectContaining({ state: 'done' })])
+    expect(calls.map((call) => call.result.outcome).sort()).toEqual(['already-resolved', 'removed'])
+
+    const profile = (await adminDb.doc(`users/${owner}`).get()).data()
+    expect(profile?.penName).not.toBe('Loud Name')
+    expect(await field(`penNames/${profile?.penNameLower}`, 'uid')).toBe(owner)
+    expect(await removedNotices(owner)).toEqual([expect.not.objectContaining({ note: expect.anything() })])
+  })
+
+  it('shows a reported post’s title once, above its words', async () => {
+    const writer = await person('Sorrel')
+    const reporter = await person('Vetch')
+    const g = await group([writer, reporter])
+    const path = `${g}/posts/p1`
+    await adminDb.doc(path).set({ authorUid: writer, title: 'Tonight', body: 'Sitting up with Mum again.', status: 'published', createdAt: new Date() })
+    await report(path, [reporter])
+    await queued(path)
+
+    expect(await field(`modQueue/${queueId(path)}`, 'snapshot')).toEqual({ title: 'Tonight', text: 'Sitting up with Mum again.' })
+  })
+
+  it('takes three new reports to hide writing a moderator kept up', async () => {
+    const writer = await person('Aspen')
+    const reporters = [await person('Birch'), await person('Hornbeam'), await person('Elder')]
+    const late = await person('Spindle')
+    const g = await group([writer, ...reporters, late])
+    const path = `${g}/posts/p1`
+    await adminDb.doc(path).set({ authorUid: writer, body: 'A long day.', status: 'published', createdAt: new Date() })
+    await report(path, reporters)
+    await held(path)
+    await moderator()
+    expect(await callViaQueue('approveContent', { queueId: queueId(path) })).toMatchObject({ state: 'done' })
+
+    await report(path, [late])
+    await queued(path)
+    expect(await field(path, 'status')).toBe('published')
+    expect(await field(`modQueue/${queueId(path)}`, 'reports')).toEqual({ count: 1, reasons: ['harassment'], reporterUids: [late] })
+  })
+
+  it('hears again from someone who reported a profile, once a moderator has reset it', async () => {
+    const owner = await person('Loud Heron')
+    const reporter = await person('Watchful Reader')
+    const profile = `users/${owner}`
+    await report(profile, [reporter])
+    await queued(profile)
+    await moderator()
+    expect(await callViaQueue('removeContent', { queueId: queueId(profile) })).toMatchObject({ state: 'done' })
+
+    // They take another name like the one that was reset
+    await adminDb.doc(profile).update({ penName: 'Loud Heron Again', penNameLower: 'loud heron again' })
+    await report(profile, [reporter])
+    await queued(profile)
+    expect(await field(`modQueue/${queueId(profile)}`, 'snapshot')).toMatchObject({ title: 'Loud Heron Again' })
+    expect(await field(`modQueue/${queueId(profile)}`, 'reports.reporterUids')).toEqual([reporter])
+  })
+
+  it('catches up after a restart without undoing a decision or counting a report it dropped', async () => {
+    const writer = await person('Hawthorn')
+    const reporters = [await person('Sloe'), await person('Damson'), await person('Bullace')]
+    const late = await person('Medlar')
+    const outsider = await person('Passer-by')
+    const g = await group([writer, ...reporters, late])
+    const [kept, unseen, missed] = ['p1', 'p2', 'p3'].map((p) => `${g}/posts/${p}`)
+    await Promise.all([kept, unseen, missed].map((path) => adminDb.doc(path).set({ authorUid: writer, body: 'A quiet evening.', status: 'published', createdAt: new Date() })))
+    const handled = (refs: DocumentReference[]) =>
+      eventually(async () => (await Promise.all(refs.map((ref) => ref.get()))).every((snap) => snap.get('handledAt') !== undefined), 'the reports to be handled')
+
+    // Three reports hide one post, and a fourth, sent as it was hidden, is dropped
+    const first = await report(kept, reporters)
+    await held(kept)
+    const dropped = await report(kept, [late])
+    // Someone outside the group reports another, which is dropped; they join later
+    const outside = await report(unseen, [outsider])
+    await handled([...first, ...dropped, ...outside])
+    await moderator()
+    expect(await callViaQueue('approveContent', { queueId: queueId(kept) })).toMatchObject({ state: 'done' })
+    await adminDb.doc(`${g}/members/${outsider}`).set({ uid: outsider, joinedAt: new Date() })
+
+    backend.stop()
+    // The first three as handled before reports were marked: only their time keeps them from counting again
+    await Promise.all(first.map((ref) => ref.update({ handledAt: FieldValue.delete() })))
+    const sentWhileOff = await report(missed, [late])
+    backend = await startBackend()
+    await handled([...first, ...sentWhileOff])
+    // Anything else it replayed has had time to land
+    await sleep(1000)
+
+    expect(await field(`modQueue/${queueId(missed)}`, 'reports.reporterUids')).toEqual([late])
+    expect(await field(kept, 'status')).toBe('published')
+    expect(await field(`modQueue/${queueId(kept)}`, 'state')).toBe('resolved')
+    // Filed together, so counted in whatever order they landed
+    expect((await field(`modQueue/${queueId(kept)}`, 'reports.reporterUids')).sort()).toEqual([...reporters].sort())
+    expect((await adminDb.doc(`modQueue/${queueId(unseen)}`).get()).exists).toBe(false)
   })
 })

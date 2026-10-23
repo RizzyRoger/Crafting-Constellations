@@ -14,7 +14,8 @@ export const createChat = onCall<{ name: string; uids: string[] }>(callable(), a
   if (request.auth?.token.email_verified !== true) throw new HttpsError('permission-denied', 'Confirm your email first.')
   if ((await db.doc(`bans/${me}`).get()).exists) throw new HttpsError('permission-denied', 'This account is paused.')
 
-  const name = checkPenName(typeof request.data?.name === 'string' ? request.data.name : '')
+  // A chat's name can't pass for a person: plurals and a second alphabet are fine
+  const name = checkPenName(typeof request.data?.name === 'string' ? request.data.name : '', { chat: true })
   if (!name.ok) throw new HttpsError('invalid-argument', 'name', { problem: name.problem })
 
   const raw: unknown = request.data?.uids

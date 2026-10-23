@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { DocumentData, DocumentReference, Query, QuerySnapshot } from 'firebase-admin/firestore'
 import type { CallableFunction, CallableRequest } from 'firebase-functions/v2/https'
+import { earliestFirst, listParam, namesAnyone, statusBefore } from './localBackendPolicy.js'
 
 // Must match the allow-list in firestore.rules (calls/{callId})
 const CALLABLES = [
@@ -33,8 +34,9 @@ const CALLABLES = [
   'createChat',
 ] as const
 
-// The site gives up after 25s; anything older is not run, so a backlog never
-// performs something (like deleting an account) long after the person left
+// The site gives up on a call nobody picks up within 25s (once one is running, it waits for
+// the answer); anything older is not run, so a backlog never performs something (like
+// deleting an account) long after the person left
 const CALL_TTL_MS = 30_000
 const CALL_CLEANUP_EVERY_MS = 10 * 60_000
 
@@ -51,11 +53,9 @@ const prepareEnv = () => {
   process.env.FIREBASE_CONFIG ??= JSON.stringify({ projectId })
   const params = fileURLToPath(new URL(`../.env.${process.env.FIRESTORE_EMULATOR_HOST ? 'local' : projectId}`, import.meta.url))
   if (existsSync(params)) process.loadEnvFile(params)
-  // The Firebase CLI hands list params to functions as JSON; .env files hold them comma-separated
-  const admins = process.env.ADMIN_EMAILS
-  if (admins !== undefined && !admins.trim().startsWith('[')) {
-    process.env.ADMIN_EMAILS = JSON.stringify(admins.split(',').map((email) => email.trim()).filter(Boolean))
-  }
+  process.env.ADMIN_EMAILS = listParam(process.env.ADMIN_EMAILS)
+  // Unset, or empty as functions/.env.example leaves it
+  if (!namesAnyone(process.env.ADMIN_EMAILS)) log(`no emails in ADMIN_EMAILS (${params} or the environment): nobody can make themselves a moderator`)
   return projectId
 }
 
@@ -98,9 +98,8 @@ export const startLocalBackend = async () => {
   const { auth, db, NOT_FOUND } = await import('./app.js')
   const functions = (await import('./index.js')) as unknown as Record<(typeof CALLABLES)[number], CallableFunction<unknown, unknown>>
   const { handleNewContent } = await import('./content.js')
-  const { handleReport } = await import('./reports.js')
+  const { handleNewReport } = await import('./reports.js')
   const { mirrorFriendshipOf, noticeOnAccept } = await import('./friendships.js')
-  const { acceptedWhileAway } = await import('./notifyPolicy.js')
 
   const ignoreMissing = (error: { code?: number }) => {
     if (error.code !== NOT_FOUND) throw error
@@ -136,14 +135,21 @@ export const startLocalBackend = async () => {
 
   const answer = async (ref: DocumentReference) => {
     // Claim it first, so a replayed snapshot or a second backend never runs it twice
-    const call = await db.runTransaction(async (tx) => {
-      const data = (await tx.get(ref)).data()
+    const claimed = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref)
+      const data = snap.data()
       if (!data || data.state !== 'new') return null
-      const age = Date.now() - (data.createdAt?.toMillis?.() ?? 0)
+      // Aged on the server's clock, which also stamped createdAt: this machine's may be off
+      const age = snap.readTime.toMillis() - (data.createdAt?.toMillis?.() ?? 0)
       tx.update(ref, age > CALL_TTL_MS ? { state: 'expired' } : { state: 'running' })
-      return age > CALL_TTL_MS ? null : data
+      return { call: data, age }
     })
-    if (!call) return
+    if (!claimed) return
+    const { call, age } = claimed
+    if (age > CALL_TTL_MS) {
+      log(`${call.name} expired after ${age}ms`)
+      return
+    }
     const started = Date.now()
     const reply = await run(call).then(
       (result) => ({ state: 'done', result: plain(result) }),
@@ -154,8 +160,10 @@ export const startLocalBackend = async () => {
     log(`${call.name} ${reply.state} in ${Date.now() - started}ms`)
   }
 
+  // Cut off on the server's clock (every read carries it), like the expiry above
   const removeStaleCalls = async () => {
-    const stale = await db.collection('calls').where('createdAt', '<', new Date(Date.now() - CALL_CLEANUP_EVERY_MS)).get()
+    const { readTime } = await db.collection('calls').limit(1).get()
+    const stale = await db.collection('calls').where('createdAt', '<', new Date(readTime.toMillis() - CALL_CLEANUP_EVERY_MS)).get()
     await Promise.all(stale.docs.map((d) => d.ref.delete()))
   }
 
@@ -209,32 +217,34 @@ export const startLocalBackend = async () => {
 
   // ---------- friendships ----------
 
-  // Snapshots carry no "before", so remember each status to see pending → accepted.
-  // The first snapshot fills this in, and announces acceptances from while we were off
-  // (recent ones only; the notice id names the acceptance, so none is announced twice).
+  // Remember each status to see pending → accepted. The first snapshot fills this in. Recent
+  // acceptances we never saw asked (made while we were off, or while the listener reconnected)
+  // are announced too; the notice id names the acceptance, so none is announced twice.
   const statuses = new Map<string, string>()
   let connectionsPrimed = false
   const onConnections = (snap: QuerySnapshot) => {
+    const serverNow = snap.readTime.toMillis()
     snap.docChanges().forEach((change) => {
       const id = change.doc.id
       const after = change.type === 'removed' ? undefined : change.doc.data()
-      const before = statuses.get(id)
+      const before = statusBefore(statuses.get(id), after?.status, after?.updatedAt?.toMillis?.(), serverNow)
       if (after) statuses.set(id, after.status)
       else statuses.delete(id)
-      void retrying(`friendship ${id}`, () => mirrorFriendshipOf(id, after))
-      if (connectionsPrimed) void retrying(`accepted ${id}`, () => noticeOnAccept(id, before, after))
-      else if (after && acceptedWhileAway(after.status, after.updatedAt?.toMillis?.(), Date.now())) {
-        void retrying(`accepted while away ${id}`, () => noticeOnAccept(id, 'pending', after))
-      }
+      // A retry looks at the connection again, so it can't put back what a later change removed
+      void retrying(`friendship ${id}`, () => mirrorFriendshipOf(id))
+      void retrying(`accepted ${id}`, () => noticeOnAccept(id, before, after))
     })
     if (connectionsPrimed) return
     connectionsPrimed = true
-    // Connections removed while we were off left their friendship behind
+    // Connections removed while we were off left their friendship behind. Each is checked
+    // against its connection as it is now: one accepted since this snapshot keeps its line.
     const accepted = new Set(snap.docs.filter((d) => d.data().status === 'accepted').map((d) => d.id))
     void db
       .collection('friendships')
       .get()
-      .then((friendships) => Promise.all(friendships.docs.filter((d) => !accepted.has(d.id)).map((d) => d.ref.delete())))
+      .then((friendships) =>
+        friendships.docs.filter((d) => !accepted.has(d.id)).forEach((d) => void retrying(`friendship ${d.id}`, () => mirrorFriendshipOf(d.id))),
+      )
   }
 
   const added = (handle: (ref: DocumentReference, data: DocumentData) => Promise<unknown>, what: string) => (snap: QuerySnapshot) =>
@@ -242,6 +252,22 @@ export const startLocalBackend = async () => {
       .docChanges()
       .filter((change) => change.type === 'added')
       .forEach((change) => void retrying(`${what} ${change.doc.ref.path}`, () => handle(change.doc.ref, change.doc.data())))
+
+  // ---------- moderation ----------
+
+  // Each person's writing is judged one note at a time, earliest written first, as it would be
+  // live. The flood check counts only notes written before each one, so a burst judged newest
+  // first (or in id order, as snapshots list it) would slip past it.
+  const inWrittenOrder = earliestFirst()
+  const moderateInOrder = (snap: QuerySnapshot) =>
+    snap
+      .docChanges()
+      .filter((change) => change.type === 'added')
+      .forEach(({ doc }) =>
+        inWrittenOrder(String(doc.get('authorUid')), doc.get('createdAt')?.toMillis?.() ?? 0, () =>
+          retrying(`moderate ${doc.ref.path}`, () => handleNewContent(doc.ref)),
+        ),
+      )
 
   const stops = [
     watch('calls', db.collection('calls').where('state', '==', 'new'), (snap) =>
@@ -251,9 +277,10 @@ export const startLocalBackend = async () => {
         .forEach((change) => void answer(change.doc.ref).catch((error: unknown) => log('answering failed:', error))),
     ),
     ...['posts', 'comments', 'messages'].map((group) =>
-      watch(`pending ${group}`, db.collectionGroup(group).where('status', '==', 'pending'), added((ref) => handleNewContent(ref), 'moderate')),
+      watch(`pending ${group}`, db.collectionGroup(group).where('status', '==', 'pending'), moderateInOrder),
     ),
-    watch('reports', db.collection('reports'), added((_, data) => handleReport(data), 'report')),
+    // Every report comes again on a restart; each one marked handled is skipped
+    watch('reports', db.collection('reports'), added(handleNewReport, 'report')),
     watch('connections', db.collection('connections'), onConnections),
     watch('members', db.collectionGroup('members'), parentsOnChange(recountGroups, allGroups)),
     watch('likes', db.collectionGroup('likes'), parentsOnChange(recountPosts, allPosts)),

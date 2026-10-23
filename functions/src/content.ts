@@ -29,7 +29,10 @@ export const handleNewContent = async (ref: DocumentReference) => {
       tx.get(rateRef),
     ])
     const now = FieldValue.serverTimestamp()
-    const { flooded, stamps } = applyFlood(rateSnap.data()?.stamps, Date.now())
+    // Paced by when it was written (createdAt is the server's time, held by the rules), so a
+    // backlog the local backend catches up on after downtime isn't taken for a burst
+    const writtenAt: number = data.createdAt?.toMillis?.() ?? Date.now()
+    const { flooded, stamps } = applyFlood(rateSnap.data()?.stamps, writtenAt)
 
     if (banSnap.exists || !userSnap.exists) {
       tx.update(ref, { status: 'removed', removedBy: 'automod', removedAt: now })

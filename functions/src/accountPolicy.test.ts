@@ -22,6 +22,10 @@ describe('confirmMatches', () => {
     expect(confirmMatches('  quiet   HERON ', 'quiet heron')).toBe(true)
   })
 
+  it('matches a curly apostrophe against the plain one', () => {
+    expect(confirmMatches('O’Neil', "o'neil")).toBe(true)
+  })
+
   it('refuses a different name, an empty answer, or a non-string', () => {
     expect(confirmMatches('Quiet Hero', 'quiet heron')).toBe(false)
     expect(confirmMatches('', 'quiet heron')).toBe(false)
