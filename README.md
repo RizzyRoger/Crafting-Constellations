@@ -65,8 +65,8 @@ npm run test:local-backend
 
 - `npm test` covers the moderation rules, the constellation layout, the account-deletion rules, and helpers.
 - `npm run test:rules` runs the Firestore and Storage security rules against the emulators.
-- `npm run test:e2e` runs account deletion end to end (function, triggers, Storage) against the emulators.
-- `npm run test:local-backend` runs the local backend (below) against the emulators, with no Functions emulator.
+- `npm run test:e2e` runs account deletion (function, triggers, Storage), a moderator's profile reset, a moderator's licence review, removing a moderator (in the app and with `grant-admin`), and chat and group names end to end against the emulators.
+- `npm run test:local-backend` runs the local backend (below) against the emulators, with no Functions emulator, plus a rename racing a moderator's profile reset and reporting rounds after a moderator's decision.
 
 Stop `npm run emulators` before the last three; they use the same ports.
 
@@ -197,7 +197,7 @@ While the project can't use Cloud Functions, a small program on our own machine 
 2. Get the key file: Firebase console → ⚙️ Project settings → **Service accounts** → **Generate new private key**. Save it on the NUC only, readable by you alone:
    - for example `~/crafting-constellations-key.json`, with `chmod 600`;
    - it grants full access to the project: never commit it, never paste it anywhere.
-3. List the moderators in `functions/.env.crafting-constellations-bf029` (gitignored), for example `ADMIN_EMAILS=you@example.com`.
+3. List the moderators in `functions/.env.crafting-constellations-bf029` (gitignored), for example `ADMIN_EMAILS=you@example.com`. With nobody listed (the line is empty in `functions/.env.example`), nobody can make themselves a moderator, and the backend says so when it starts.
 4. Try it. It prints `running for crafting-constellations-bf029` and one line per call:
 
    ```bash
@@ -230,6 +230,8 @@ While the project can't use Cloud Functions, a small program on our own machine 
 
    Logs: `journalctl -u crafting-constellations -f`. If a Firestore listener fails, the program exits on purpose so systemd restarts it.
 
+   Keep the NUC's clock in sync: `timedatectl` should show `System clock synchronized: yes`. Google turns the key away from a clock that's far off. Calls, and how recently someone leaving signed in, are timed on the server's clock, so a few minutes' drift doesn't matter.
+
 **On the site:**
 1. Set `VITE_LOCAL_BACKEND=true` in `.env.local`.
 2. Deploy the rules and indexes; the backend needs the collection-group `status` indexes:
@@ -258,11 +260,11 @@ Don't run both at once.
 ### Privacy
 
 Counting visits (Analytics + Performance) is **opt-in per device and off by default**, and never runs on the emulators.
-- **Analytics:** gets the route pattern (`/groups/:groupId`), never the real address, plus three fixed events: `sign_up`, `login`, `delete_account`.
-- **Never sent:** user ids, ad signals or Google signals.
-- **Performance:** sends real page addresses and load times. The consent note says so.
+- **Analytics:** gets the route pattern (`/groups/:groupId`), never the real address or a user id, plus three fixed events: `sign_up`, `login`, `delete_account`.
+- **Never sent:** ad signals or Google signals.
+- **Performance:** sends real page addresses, the addresses each page fetches, and load times. It has no setting to send route patterns instead, so an address can hold account, group, post and chat ids and a group's name: a private thread's is `/messages/<uid>_<uid>`, both people's account ids, and a licence document's holds its owner's. The consent note says so.
 
-People can change their answer under **You → Account**.
+People can change their answer under **You → Account**. An answer reaches every open tab on the device, so a "no" stops them all.
 
 ### Account deletion
 
@@ -276,7 +278,18 @@ People can change their answer under **You → Account**.
 - their licence application and documents, and their posting-rate stamps;
 - the sign-in itself.
 
-Ban records and the audit log stay; the audit row holds ids and counts only. Moderators can't delete themselves; another moderator has to remove their role first.
+Ban records and the audit log stay; the audit row holds ids and counts only. A pen name a moderator retired with "Reset profile" stays blocked, so nobody can take it again; that record is the name alone, with nothing that points to the account. Moderators can't delete themselves; another moderator has to remove their role first (see Moderators).
+
+### Moderators
+
+- **The first one** claims the role on **Review** with a confirmed email listed in `ADMIN_EMAILS` (step 7 under "After upgrading to Blaze").
+- **Adding one:** **Review → People → Make moderator**. They open Review at `/admin`, which fetches their new role; from then on it's in their sidebar.
+- **Removing one:** **Review → People → Remove moderator**. Nobody can remove their own role. Moderators can't be banned until their role is removed.
+  - Their moderator actions (approve, remove, ban, licences, roles, groups) stop at once: the functions check the role in Auth on every call, not only in the person's token.
+  - Their sessions end, as a ban's do, so each device signs in again without the role. A page of theirs that's open signs out when they next come back to it.
+  - **What still lags:** the Firestore and Storage rules read the role from the ID token, and a token already given out can't be taken back. One they hold can still read the review queue, reports, bans, the audit log, licence applications and documents, and every group's writing until it expires, up to an hour after it was made. Making it immediate would mean the rules looking up a moderator record on every read.
+  - Someone whose email is still in `ADMIN_EMAILS` can claim the role again: take them off the list too.
+  - `npm run grant-admin -- --uid <uid> --remove` does the same from a terminal, ending their sessions too.
 
 ## How it fits together
 
