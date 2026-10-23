@@ -6,7 +6,7 @@ import { Quiet } from '../components/Quiet'
 import { ConstellationList } from '../constellation/ConstellationList'
 import { ConstellationMap } from '../constellation/ConstellationMap'
 import { EgoMap } from '../constellation/EgoMap'
-import type { EgoTie } from '../constellation/egoLayout'
+import { chartIsEmpty, type EgoTie } from '../constellation/egoLayout'
 import { PersonSheet } from '../constellation/PersonSheet'
 import { CHOOSE } from '../constellation/sheetReveal'
 import { db } from '../lib/firebase'
@@ -83,6 +83,11 @@ export const Constellation = () => {
     () => connections.data.filter((c) => c.status === 'blocked').map((c) => c.uids.find((id) => id !== uid) ?? '').filter(Boolean),
     [connections.data, uid],
   )
+  // Everyone's friendships are listened to, so the welcome asks about yours, not the site's
+  const alone = useMemo(
+    () => chartIsEmpty({ me: uid, friendships: friendshipTies, pending: pendingTies, blocked }),
+    [uid, friendshipTies, pendingTies, blocked],
+  )
   const sharedGroups = useMemo(() => {
     const mine = new Set(memberships.filter((m) => m.uid === uid).map((m) => m.groupId))
     const counts: Record<string, number> = {}
@@ -123,9 +128,11 @@ export const Constellation = () => {
       {loading ? (
         <Quiet>Laying out the chart…</Quiet>
       ) : (
-        <div className="constellation">
+        // Focusable from script, so closing a sheet that nothing on the chart opened (the rail
+        // search did) leaves focus here rather than at the top of the page
+        <div className="constellation" tabIndex={-1}>
           {view === 'friends' ? (
-            friendshipTies.length === 0 && pendingTies.length === 0 ? (
+            alone ? (
               <ChartWelcome
                 seed={profile.avatarSeed || uid}
                 pigment={profile.pigment}

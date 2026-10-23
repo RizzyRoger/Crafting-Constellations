@@ -90,6 +90,11 @@ p {
   padding: clamp(20px, 4vh, 40px) clamp(20px, 3vw, 48px) 24px;
 }
 
+/* Focused only from code, when the check-in prompt is set aside: the whole page needs no ring */
+.shell__main:focus-visible {
+  outline: none;
+}
+
 .rail {
   position: sticky;
   top: 0;
@@ -101,6 +106,21 @@ p {
   padding: 22px 16px 28px;
   border-right: 1px solid var(--ink);
   background: var(--paper);
+}
+
+/* Above the phone rules (@media max-width 900px), which change these and must come later to win */
+.rail__browse {
+  min-height: 0;
+  overflow: auto;
+  flex: 1;
+}
+
+.rail__foot {
+  flex: none;
+  margin-top: auto;
+  display: grid;
+  gap: 14px;
+  padding-top: 16px;
 }
 
 .rail .plate__name {
@@ -203,12 +223,15 @@ p {
   align-content: center;
 }
 
+/* A chat's name can be one 32-letter word. On a phone the head's single column grew to fit it, and
+   the chat and its send bar scrolled sideways */
 .page-head h1 {
   font-family: var(--font-pencil);
   font-weight: 300;
   font-size: clamp(28px, 3.4vw, 40px);
   line-height: 1.1;
   color: var(--ink-deep);
+  overflow-wrap: anywhere;
 }
 
 .page-head .lede {
@@ -405,12 +428,15 @@ p {
   color: var(--meta-readable);
 }
 
+/* A title can be a link's whole address, one long word. It breaks rather than widening the post list,
+   which on a phone scrolled every post sideways */
 .post__title {
   font-family: var(--font-pencil);
   font-weight: 400;
   font-size: 22px;
   line-height: 1.2;
   color: var(--ink-deep);
+  overflow-wrap: anywhere;
 }
 
 .post__title a {
@@ -675,9 +701,19 @@ p {
   text-underline-offset: 4px;
 }
 
-.pigments input:focus-visible + .swatch {
+/* The radio is hidden, and the swatch's mask (its wet edge) clips anything drawn outside it, a focus
+   ring included. So the ring goes round the whole label */
+.pigments label:has(input:focus-visible) {
   outline: 2px solid var(--ink);
-  outline-offset: 3px;
+  outline-offset: 2px;
+}
+
+/* Without :has(), round the pigment's name */
+@supports not selector(:has(a)) {
+  .pigments input:focus-visible + .swatch + .code {
+    outline: 2px solid var(--ink);
+    outline-offset: 3px;
+  }
 }
 
 .act[disabled] {
@@ -761,10 +797,12 @@ p {
   align-items: center;
 }
 
+/* A pen name can be 32 letters with no space, wider than a phone at this size */
 .person__name {
   font-family: var(--font-pencil);
   font-size: 24px;
   color: var(--ink-deep);
+  overflow-wrap: anywhere;
 }
 
 /* ---------- quiet full-page states ---------- */
@@ -794,19 +832,20 @@ p {
     padding: 16px 16px 16px;
   }
 
+  /* Capped, so the rail scrolls as a whole and the lists keep their height. With the foot pinned they
+     got what it left: 14px at 375x667, none in landscape, and a longer foot lost Sign out too */
   .rail {
     position: static;
     min-height: 0;
     max-height: 38vh;
-    overflow: hidden;
+    overflow: auto;
     border-right: 0;
     border-bottom: 1px solid var(--ink);
     gap: 8px;
   }
 
   .rail__browse {
-    min-height: 0;
-    overflow: auto;
+    flex: none;
   }
 
   .rail__foot {
@@ -1376,6 +1415,14 @@ p {
   outline-offset: 3px;
 }
 
+/* Writing held for a link repeats it whole on the matched line, and may carry it in its title. An
+   address with no hyphen is one long word, which widened the page past a phone's width. anywhere,
+   not break-word: only anywhere lets the list's column shrink below the word */
+.admin-entry > .post__title,
+.admin-entry > .meta {
+  overflow-wrap: anywhere;
+}
+
 .admin-dl {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -1391,8 +1438,10 @@ p {
   color: var(--meta-readable);
 }
 
+/* A statement may link to a licensing board's lookup, one long word */
 .admin-dl dd {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 /* ---------- wire chrome: rail, graph, bubbles, cards ---------- */
@@ -1486,20 +1535,6 @@ a.disc__empty:hover {
 .disc__list a[aria-current='page'] {
   text-decoration: underline;
   text-underline-offset: 3px;
-}
-
-.rail__browse {
-  min-height: 0;
-  overflow: auto;
-  flex: 1;
-}
-
-.rail__foot {
-  flex: none;
-  margin-top: auto;
-  display: grid;
-  gap: 14px;
-  padding-top: 16px;
 }
 
 .rail__quiet {

@@ -28,6 +28,13 @@ const peopleHere = (count: number | undefined) => {
   return n === 1 ? '1 person is here.' : `${n} people are here.`
 }
 
+// The icon is hidden, so this is the comment link's whole name
+const commentsLabel = (count: number | undefined) => {
+  const n = count ?? 0
+  if (n === 0) return 'Comment'
+  return n === 1 ? '1 comment' : `${n} comments`
+}
+
 const RoomHost = ({ description, count }: { description?: string; count?: number }) => (
   <>
     {description ? <p>{description}</p> : null}
@@ -88,7 +95,7 @@ const Posts = ({ group, me, verified, people }: { group: GroupDoc; me: string; v
                   p.status === 'published' && (
                     <>
                       {verified && <LikeButton postPath={p.path} me={me} count={p.likeCount} />}
-                      <Link to={`/groups/${group.id}/posts/${p.id}`} className="mark" aria-label={p.commentCount ? `${p.commentCount} comments` : 'Comment'}>
+                      <Link to={`/groups/${group.id}/posts/${p.id}`} className="mark" aria-label={commentsLabel(p.commentCount)}>
                         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
                           <path d="M5 6.5h14v9H8l-3 3v-12z" />
                         </svg>
@@ -183,7 +190,11 @@ export const Group = () => {
         </div>
       </PageHead>
 
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
 
       {member ? (
         <>

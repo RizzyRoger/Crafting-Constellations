@@ -102,6 +102,19 @@ describe('calls through the local backend', () => {
     expect((seen.error as FirebaseError).code).toBe('functions/invalid-argument')
     expect(problemOf(seen.error)).toBe('confirm')
   })
+
+  it('stops waiting at once when the backend had to stop partway, and says to check before trying again', async () => {
+    const { deleteAccount, describeError } = await load(true)
+    const seen = watch(deleteAccount({ confirm: 'Wren' }))
+    await vi.advanceTimersByTimeAsync(1_000)
+    fake.answer({ state: 'running' })
+    await vi.advanceTimersByTimeAsync(5_000)
+    // What the backend writes for a call it took on when it is stopped (a restart, a reboot)
+    fake.answer({ state: 'failed', error: { status: 'unavailable', message: 'The server stopped before it finished.' } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect((seen.error as FirebaseError).code).toBe('functions/unavailable')
+    expect(describeError(seen.error)).toBe('The server stopped before it finished. Check whether it went through, then try again.')
+  })
 })
 
 describe('calls through Cloud Functions', () => {

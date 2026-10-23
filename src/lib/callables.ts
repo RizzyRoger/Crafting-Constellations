@@ -46,7 +46,8 @@ const viaLocalBackend =
             const call = snap.data() as CallDoc | undefined
             if (!call || call.state === 'new') return
             if (call.state === 'running') {
-              // Picked up: it runs to the end whether we wait or not, so wait for its answer
+              // Picked up: the backend answers when it's done, or as interrupted if it's stopped
+              // first, so wait for its answer. Only a crash leaves us waiting the whole time.
               clearTimeout(timer)
               timer = setTimeout(giveUp, LONGEST_RUN_MS)
               return
@@ -75,7 +76,7 @@ const call = <In, Out = { ok: true }>(name: string, options?: HttpsCallableOptio
 
 export const saveProfile = call<{ penName?: string; note?: string; pigment?: string }, { ok: true; crisis: boolean; penName: string }>('saveProfile')
 // What came of Approve or Remove (Outcome in functions/src/adminPolicy.ts). An older backend leaves it out
-export type ModOutcome = 'published' | 'restored' | 'undelivered' | 'kept' | 'removed' | 'withdrawn' | 'gone' | 'already-resolved'
+export type ModOutcome = 'published' | 'restored' | 'undelivered' | 'paused' | 'kept' | 'removed' | 'withdrawn' | 'gone' | 'already-resolved'
 export const approveContent = call<{ queueId: string }, { ok: true; outcome?: ModOutcome }>('approveContent')
 export const removeContent = call<{ queueId: string; note?: string }, { ok: true; outcome?: ModOutcome }>('removeContent')
 export const banUser = call<{ uid: string; reason: string; hideContent?: boolean }>('banUser')
@@ -126,6 +127,8 @@ export const describeError = (error: unknown): string => {
     'functions/not-found': 'That isn’t there any more.',
     'unavailable': 'No connection right now. It will retry.',
     'functions/deadline-exceeded': 'The server didn’t answer. Try again in a moment.',
+    // The local backend was stopped partway through (a restart): some of it may have been done
+    'functions/unavailable': 'The server stopped before it finished. Check whether it went through, then try again.',
     // Licence documents, opened by a moderator or uploaded by their owner
     'storage/object-not-found': 'That document isn’t there.',
     'storage/unauthorized': 'You can’t do that here.',

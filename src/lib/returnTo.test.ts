@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hereOf, returnTo } from './returnTo'
+import { afterVerify, hereOf, returnTo } from './returnTo'
 
 describe('hereOf', () => {
   it('keeps the query and hash, so a tab or a selected person comes back too', () => {
@@ -37,5 +37,24 @@ describe('returnTo', () => {
     ]) {
       expect(returnTo({ from }), from).toBe('/constellation')
     }
+  })
+})
+
+describe('afterVerify', () => {
+  it('goes back to the page that asked for a confirmed email', () => {
+    expect(afterVerify(true, { from: '/groups/abc?tab=posts' })).toEqual({ to: '/groups/abc?tab=posts' })
+  })
+
+  it('goes to their constellation when nothing asked', () => {
+    expect(afterVerify(true, null)).toEqual({ to: '/constellation' })
+  })
+
+  it('has someone with no pen name choose one first, carrying the page on', () => {
+    expect(afterVerify(false, { from: '/groups/abc' })).toEqual({ to: '/onboarding', state: { from: '/groups/abc' } })
+    expect(afterVerify(false, null)).toEqual({ to: '/onboarding', state: null })
+  })
+
+  it('never goes to another site', () => {
+    expect(afterVerify(true, { from: '//elsewhere.example/' })).toEqual({ to: '/constellation' })
   })
 })

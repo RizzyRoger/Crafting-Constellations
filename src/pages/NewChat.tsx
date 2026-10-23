@@ -2,7 +2,7 @@ import { checkPenName, PEN_NAME_HINTS, type PenNameProblem } from '@moderation'
 import { FirebaseError } from 'firebase/app'
 import { collection, query, where } from 'firebase/firestore'
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { PageHead } from '../components/PageHead'
 import { Who } from '../components/Who'
@@ -10,6 +10,7 @@ import { createChat, describeError, problemOf } from '../lib/callables'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import { otherInPair } from '../lib/pair'
+import { hereOf } from '../lib/returnTo'
 import type { Connection, Profile } from '../lib/types'
 import { HEAD_DESCENDING } from '../wash/strokes'
 
@@ -36,6 +37,7 @@ const errorText = (error: unknown) => {
 export const NewChat = () => {
   const { uid, claims } = useMe()
   const navigate = useNavigate()
+  const location = useLocation()
   const [name, setName] = useState('')
   const [picked, setPicked] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
@@ -88,7 +90,7 @@ export const NewChat = () => {
         {head}
         <div className="banner">
           <p className="pencil note">Private chats open once your email is confirmed.</p>
-          <Link to="/verify" className="act act--wash" style={{ justifySelf: 'start' }}>
+          <Link to="/verify" state={{ from: hereOf(location) }} className="act act--wash" style={{ justifySelf: 'start' }}>
             Confirm email
           </Link>
         </div>
@@ -126,7 +128,11 @@ export const NewChat = () => {
           )}
         </fieldset>
 
-        {error && <p className="error">{error}</p>}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
 
         <div className="row">
           <button type="submit" className="act act--wash" disabled={busy || !check.ok || picked.length === 0}>

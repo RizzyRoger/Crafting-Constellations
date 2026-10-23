@@ -56,6 +56,8 @@ export const Composer = ({
   const [picked, setPicked] = useState<ReadonlyMap<string, string>>(new Map())
   const field = useRef<HTMLTextAreaElement>(null)
   const nextCaret = useRef<number | null>(null)
+  // The words as they stand, for a send that lands after more was typed
+  const draft = useRef({ text, title })
   const id = useId()
   const listId = `${id}-people`
   const expanded = expandable && open
@@ -63,6 +65,7 @@ export const Composer = ({
 
   const preview = useMemo(() => (text.trim() ? moderate(`${title}\n${text}`, { context }) : null), [text, title, context])
   const mayWait = preview?.action === 'hold' && !(context === 'private' && preview.crisis)
+  const waitNote = mayWait ? 'This may wait for a person to read it before others see it.' : ''
 
   const query = people && people.length > 0 ? mentionQuery(text, caret) : null
   const matches = query && query.start !== dismissed && people ? matchPeople(people, query.query) : []
@@ -75,6 +78,10 @@ export const Composer = ({
     field.current.focus()
     field.current.setSelectionRange(nextCaret.current, nextCaret.current)
     nextCaret.current = null
+  })
+
+  useLayoutEffect(() => {
+    draft.current = { text, title }
   })
 
   const pick = (person: Mentionable) => {
@@ -92,15 +99,21 @@ export const Composer = ({
     event.preventDefault()
     const body = text.trim()
     if (!body || sending) return
+    const sent = { text, title }
     setSending(true)
     setError(null)
     try {
       await onSubmit(body, withTitle && title.trim() ? title.trim() : undefined, keptMentions(body, picked))
-      setText('')
-      setTitle('')
-      setPicked(new Map())
-      setDismissed(null)
-      setOpen(false)
+      // Anything typed while it was on its way is the next message: clear only what went
+      const textWent = draft.current.text === sent.text
+      const titleWent = draft.current.title === sent.title
+      if (textWent) {
+        setText('')
+        setPicked(new Map())
+        setDismissed(null)
+      }
+      if (titleWent) setTitle('')
+      if (textWent && titleWent) setOpen(false)
     } catch (e) {
       setError(describeError(e))
     } finally {
@@ -204,19 +217,24 @@ export const Composer = ({
       <div className="composer__foot">
         {!bar && (
           <span className="hint" aria-live="polite">
-            {mayWait ? 'This may wait for a person to read it before others see it.' : ''}
+            {waitNote}
           </span>
         )}
         <button type="submit" className={bar ? 'composer__send' : 'act act--wash'} disabled={disabled || sending || !text.trim()}>
           {sending ? 'Sending…' : submitLabel}
         </button>
       </div>
-      {bar && mayWait && (
-        <p className="hint" aria-live="polite">
-          This may wait for a person to read it before others see it.
+      {/* Mounted from the start, so screen readers announce the note when it lands */}
+      {bar && (
+        <p className="hint live" aria-live="polite">
+          {waitNote}
         </p>
       )}
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </form>
   )
 }

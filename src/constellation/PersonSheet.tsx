@@ -5,9 +5,10 @@ import { Who } from '../components/Who'
 import { howToBlock } from '../lib/blocks'
 import { describeError } from '../lib/callables'
 import { pairIdOf } from '../lib/pair'
+import { hereOf } from '../lib/returnTo'
 import { acceptConnection, blockConnection, blockPerson, removeConnection, requestConnection } from '../lib/social'
 import type { Connection, Group, Profile } from '../lib/types'
-import { lastChoice, revealSheet, SHEET_FLOATS } from './sheetReveal'
+import { focusOnClose, lastChoice, openerOf, revealSheet } from './sheetReveal'
 
 interface PersonSheetProps {
   person: Profile
@@ -29,16 +30,27 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
   const [chosenAt, setChosenAt] = useState(location.key)
   const choice = lastChoice(chosenAt, location)
   if (choice !== chosenAt) setChosenAt(choice)
+  const opener = useRef<HTMLElement | SVGElement | null>(null)
 
-  // Narrower than the floating overlay, the sheet opens under the chart, out of sight. Bring it
-  // into view and move focus to it, so choosing someone visibly does something. This runs when the
-  // sheet opens (it's keyed by person) and again each time this person is chosen while it's open
+  // Whether it opens under the chart or floats at the top of a chart scrolled past, the sheet can
+  // be out of sight. Bring it into view and move focus to it, so choosing someone visibly does
+  // something, and note what chose them to give focus back on closing. This runs when the sheet
+  // opens (it's keyed by person) and again each time this person is chosen while it's open
   useEffect(() => {
-    const reveal = revealSheet(window.matchMedia(SHEET_FLOATS).matches, window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-    if (!reveal || !sheet.current) return
-    sheet.current.scrollIntoView(reveal)
-    sheet.current.focus({ preventScroll: true })
+    const here = sheet.current
+    if (!here) return
+    const active = document.activeElement
+    opener.current = openerOf(opener.current, active instanceof HTMLElement || active instanceof SVGElement ? active : null, { body: document.body, sheet: here })
+    here.scrollIntoView(revealSheet(window.matchMedia('(prefers-reduced-motion: reduce)').matches))
+    here.focus({ preventScroll: true })
   }, [choice])
+
+  // Closing takes the focused Close button away with the sheet, which would drop focus to the
+  // top of the page. Move it first, letting it scroll into sight
+  const close = () => {
+    focusOnClose(opener.current, sheet.current?.parentElement ?? null)?.focus()
+    onClose()
+  }
 
   const run = (action: () => Promise<unknown>) => async () => {
     setBusy(true)
@@ -63,7 +75,7 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
     <section ref={sheet} tabIndex={-1} className="person sheet" aria-label={`About ${person.penName}`}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <Who person={{ ...person, avatarSeed: person.avatarSeed || person.id }} size={44} />
-        <button type="button" className="link-btn" onClick={onClose}>
+        <button type="button" className="link-btn" onClick={close}>
           Close
         </button>
       </div>
@@ -97,7 +109,7 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
               </button>
             ) : (
               <span className="hint">
-                <Link to="/verify">Confirm your email</Link> to reach out.
+                <Link to="/verify" state={{ from: hereOf(location) }}>Confirm your email</Link> to reach out.
               </span>
             ))}
 
@@ -118,7 +130,7 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
                 </button>
               ) : (
                 <span className="hint">
-                  <Link to="/verify">Confirm your email</Link> to accept.
+                  <Link to="/verify" state={{ from: hereOf(location) }}>Confirm your email</Link> to accept.
                 </span>
               )}
               <button type="button" className="act" disabled={busy} onClick={run(() => removeConnection(pairId))}>
@@ -155,7 +167,11 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
         </div>
       )}
 
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
       {!isMe && <Report contentPath={`users/${person.id}`} me={me} />}
     </section>
   )

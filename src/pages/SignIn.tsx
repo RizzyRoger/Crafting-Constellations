@@ -47,12 +47,14 @@ export const SignIn = () => {
   }
 
   const reset = async () => {
+    // Emptied first, so a second press is announced again
+    setNote(null)
     if (!email.trim()) {
       setError('Write your email above first.')
       return
     }
-    // Emptied first, so a second press is announced again
-    setNote(null)
+    // An older error would sit beside the note that a link is on its way
+    setError(null)
     await sendPasswordResetEmail(auth, email.trim()).catch(() => undefined)
     setNote('If that email has an account, a reset link is on its way.')
   }

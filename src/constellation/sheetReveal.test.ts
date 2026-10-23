@@ -1,27 +1,50 @@
-import { readFileSync } from 'node:fs'
 import { createMemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { personAddress } from './personAddress'
-import { CHOOSE, lastChoice, revealSheet, SHEET_FLOATS } from './sheetReveal'
+import { CHOOSE, focusOnClose, lastChoice, openerOf, revealSheet } from './sheetReveal'
 
+// At every width: from 1200px the sheet floats at the top of a chart or list that may be
+// scrolled far past, so it needs bringing into view as much as one opening under the chart
 describe('sheet reveal', () => {
-  it('leaves the page alone where the sheet floats over the chart', () => {
-    expect(revealSheet(true, false)).toBeNull()
-    expect(revealSheet(true, true)).toBeNull()
-  })
-
-  it('scrolls a sheet that opened under the chart into view', () => {
-    expect(revealSheet(false, false)).toEqual({ block: 'nearest', behavior: 'smooth' })
+  it('scrolls the sheet to the nearest edge, so one already in sight stays put', () => {
+    expect(revealSheet(false)).toEqual({ block: 'nearest', behavior: 'smooth' })
   })
 
   it('jumps instead of gliding when motion is reduced', () => {
-    expect(revealSheet(false, true)).toEqual({ block: 'nearest', behavior: 'auto' })
+    expect(revealSheet(true)).toEqual({ block: 'nearest', behavior: 'auto' })
+  })
+})
+
+// Stand-ins for elements: what's on the page, and the sheet holding some of them
+const node = (name: string, isConnected = true) => ({ name, isConnected })
+const body = node('body')
+const star = node('star')
+const name = node('name in the list')
+const close = node('Close')
+const sheet = { contains: (n: unknown) => n === close }
+
+describe('giving focus back when the sheet closes', () => {
+  it('notes the star that had focus as the sheet came up', () => {
+    expect(openerOf(null, star, { body, sheet })).toBe(star)
   })
 
-  it('uses the same width as the stylesheet that floats the sheet', () => {
-    const css = readFileSync(new URL('../styles/app.css', import.meta.url), 'utf8')
-    const floating = css.match(/@media ([^{]+)\{\s*\.constellation \.person\.sheet\s*\{[^}]*position:\s*absolute/)
-    expect(floating?.[1].trim()).toBe(SHEET_FLOATS)
+  it('keeps the last one when focus is nowhere or already in the sheet', () => {
+    // The rail search's result unmounts as it chooses, leaving focus on the body
+    expect(openerOf(star, body, { body, sheet })).toBe(star)
+    expect(openerOf(star, null, { body, sheet })).toBe(star)
+    expect(openerOf(star, close, { body, sheet })).toBe(star)
+    expect(openerOf(null, body, { body, sheet })).toBeNull()
+  })
+
+  it('follows a second choice of the same person from somewhere else', () => {
+    expect(openerOf(star, name, { body, sheet })).toBe(name)
+  })
+
+  it('goes back to what chose them, or to the chart when that has gone', () => {
+    const chart = node('chart')
+    expect(focusOnClose(star, chart)).toBe(star)
+    expect(focusOnClose(node('star of a view switched away', false), chart)).toBe(chart)
+    expect(focusOnClose(null, chart)).toBe(chart)
   })
 })
 

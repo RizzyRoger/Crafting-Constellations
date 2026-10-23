@@ -65,6 +65,22 @@ export const freshClaims = async (user: User): Promise<Claims | null> => {
   return auth.currentUser === user ? fresh : null
 }
 
+// Someone's profile as it's heard: theirs, or null once the server says there's none. Offline, or
+// with Firestore slow to answer (it stops waiting after 10s), the first answer comes from a cache
+// that's empty on a fresh page. Taken as "no pen name yet", that sent a returning person to choose
+// one, and saving there replaced theirs. So a "none" from the cache alone isn't an answer
+export const listenToProfile = (uid: string, answer: (profile: Profile | null) => void) =>
+  onSnapshot(
+    doc(db, 'users', uid),
+    // Metadata too, only to hear the server's "none" after the cache's
+    { includeMetadataChanges: true },
+    (snap) => {
+      if (snap.exists()) answer({ id: snap.id, ...snap.data() } as Profile)
+      else if (!snap.metadata.fromCache) answer(null)
+    },
+    () => answer(null),
+  )
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null)
   const [claims, setClaims] = useState<Claims>(NO_CLAIMS)
@@ -93,11 +109,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return
     }
     const uid = user.uid
-    return onSnapshot(
-      doc(db, 'users', uid),
-      (snap) => setLoaded({ uid, profile: snap.exists() ? ({ id: snap.id, ...snap.data() } as Profile) : null }),
-      () => setLoaded({ uid, profile: null }),
-    )
+    return listenToProfile(uid, (profile) => setLoaded({ uid, profile }))
   }, [user])
 
   const refreshClaims = useCallback(async () => {

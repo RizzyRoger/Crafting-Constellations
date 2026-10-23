@@ -60,6 +60,23 @@ describe('Item', () => {
     }
   })
 
+  it('promises a person reads my held crisis note before others see it', () => {
+    for (const variant of talking) {
+      const html = render(variant, { authorUid: 'me', status: 'held', heldReason: 'crisis' })
+      expect(html).toContain('href="tel:988"')
+      expect(html).toContain('before others see it')
+    }
+  })
+
+  it('keeps the resources on my undelivered crisis note, but not the promise others will see it', () => {
+    for (const variant of talking) {
+      const html = render(variant, { authorUid: 'me', status: 'held', heldReason: 'crisis', undelivered: true })
+      expect(html).toContain('not delivered — it won’t reach them')
+      expect(html).toContain('href="tel:988"')
+      expect(html).not.toContain('before others see it')
+    }
+  })
+
   it('tells nobody else', () => {
     for (const variant of talking) {
       const html = render(variant, { status: 'held', heldReason: 'review' })

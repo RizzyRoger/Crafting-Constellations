@@ -1,5 +1,5 @@
 // A licence application, checked on the page before anything uploads.
-// Uploads are write-once (storage.rules), so a refusal after an upload costs a slot for good.
+// Once there's an application, uploads are write-once (storage.rules), so a refusal after one costs a slot.
 
 export const SLOTS = ['doc-1', 'doc-2', 'doc-3', 'doc-4', 'doc-5']
 export const DOC_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp']
@@ -10,12 +10,59 @@ export const MAX_BYTES = 10 * 1024 * 1024
 export const openSlots = (listed: readonly string[], stored: readonly string[] = []) =>
   SLOTS.filter((s) => !listed.includes(s) && !stored.includes(s))
 
+type Decided = { status: string; files?: readonly string[]; reviewedAt?: { seconds: number; nanoseconds: number } | null } | null
+
+// A turned-down or revoked applicant's new documents go in a folder named for that decision:
+// five fresh slots no moderator has seen (storage.rules). Null when there's no such decision
+export const reapplyRound = (app: Decided): string | null => {
+  if ((app?.status !== 'denied' && app?.status !== 'revoked') || !app.reviewedAt) return null
+  // Whole milliseconds, as the rule's toMillis() gives them; the SDK's toMillis() keeps a fraction
+  // whenever the time has microseconds
+  const { seconds, nanoseconds } = app.reviewedAt
+  return String(seconds * 1000 + Math.floor(nanoseconds / 1_000_000))
+}
+
+// How many new documents the form takes: five before there's an application (a failed first try
+// can be redone) and on a reapplication; otherwise the slots not used yet
+export const documentRoom = (app: Decided) => (!app || reapplyRound(app) ? SLOTS.length : openSlots(app.files ?? []).length)
+
+// An application lists five documents at most, new and earlier together
+const fits = (listed: number, count: number) => listed + count <= SLOTS.length
+
+// The unused slots to look for in Storage before placing new documents: none before there's an
+// application (any slot can be written again then), and none when the documents can't go there
+export const slotsToCheck = (app: Decided, count: number): string[] => {
+  if (!app || !count) return []
+  const listed = app.files ?? []
+  const unused = openSlots(listed)
+  return count <= unused.length && fits(listed.length, count) ? unused : []
+}
+
+// Where new documents go and what the application lists. Free slots, the names every application
+// takes, go first while they hold them all and everything fits; otherwise a reapplication's round
+// takes them, added to the ones sent before while all fit and in their place when they don't
+export const placeDocuments = (d: { listed: readonly string[]; free: readonly string[]; count: number; round: string | null }) => {
+  if (!d.round || (d.count <= d.free.length && fits(d.listed.length, d.count))) {
+    const names = d.free.slice(0, d.count)
+    return { names, files: [...d.listed, ...names] }
+  }
+  const names = SLOTS.slice(0, d.count).map((s) => `${d.round}/${s}`)
+  return { names, files: fits(d.listed.length, d.count) ? [...d.listed, ...names] : names }
+}
+
+// Next to the picker: what's chosen, and what becomes of the documents sent before
+export const documentsHint = (listed: number, chosen: readonly string[]): string | null => {
+  if (!chosen.length) return listed ? 'The documents you sent before stay with your application.' : null
+  if (!listed) return chosen.join(', ')
+  return `${chosen.join(', ')} — ${fits(listed, chosen.length) ? 'added to' : 'sent instead of'} the documents you sent before.`
+}
+
 interface Draft {
   legalName: string
   licenseRegion: string
   licenseNumber: string
   files: readonly { name: string; size: number; type: string }[]
-  // Documents already on the application, which a resubmission keeps
+  // Documents already on the application, which a resubmission can send again
   listed: readonly string[]
   // Slots free for new documents
   open: number

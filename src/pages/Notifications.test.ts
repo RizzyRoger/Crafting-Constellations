@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   store: new Map<string, Record<string, unknown>>(),
   commits: [] as number[],
   errors: [] as unknown[],
+  answered: [] as [string, string][],
 }))
 
 vi.mock('../lib/firebase', () => ({ db: {}, auth: {}, LOCAL_BACKEND: true }))
@@ -24,6 +25,17 @@ vi.mock('../lib/callables', () => ({
   describeError: (e: unknown) => {
     state.errors.push(e)
     return String(e)
+  },
+}))
+// Answering a request writes at once, as the local cache does, so the row drops on the next render
+vi.mock('../lib/social', () => ({
+  acceptConnection: async (id: string) => {
+    state.answered.push(['accept', id])
+    state.store.set(`connections/${id}`, { ...state.store.get(`connections/${id}`), status: 'accepted' })
+  },
+  removeConnection: async (id: string) => {
+    state.answered.push(['remove', id])
+    state.store.delete(`connections/${id}`)
   },
 }))
 vi.mock('../auth/AuthProvider', () => ({
@@ -59,12 +71,15 @@ vi.mock('firebase/firestore', async (original) => ({
 
 const millis = (d: Data) => (d.createdAt as { toMillis: () => number }).toMillis()
 
+const matches = (d: Data, [field, op, value]: [string, string, unknown]) =>
+  op === 'array-contains' ? Array.isArray(d[field]) && d[field].includes(value) : op === '==' && d[field] === value
+
 // A query run against the store, as Firestore would answer it
 const run = ({ path, constraints }: Asked) => {
   const rows = [...state.store.entries()]
     .filter(([p]) => p.startsWith(`${path}/`) && !p.slice(path.length + 1).includes('/'))
     .map(([p, d]) => ({ id: p.split('/').pop()!, path: p, ...d }) as Data)
-    .filter((d) => constraints.every((c) => !c.where || (c.where[1] === '==' && d[c.where[0]] === c.where[2])))
+    .filter((d) => constraints.every((c) => !c.where || matches(d, c.where)))
   const order = constraints.find((c) => c.orderBy)?.orderBy
   if (order) rows.sort((a, b) => (order[1] === 'desc' ? millis(b) - millis(a) : millis(a) - millis(b)))
   const cap = constraints.find((c) => c.limit)?.limit
@@ -102,8 +117,9 @@ const rendered = () => {
 
 const markup = () => renderToStaticMarkup(createElement(MemoryRouter, null, createElement(Notifications)))
 
-type Clickable = ReactElement<{ children?: ReactNode; onClick?: () => Promise<void> }>
+type Clickable = ReactElement<{ children?: ReactNode; onClick?: (e: { detail: number }) => Promise<void> }>
 
+// The first button with this label, in page order
 const findButton = (node: ReactNode, label: string): Clickable | null => {
   if (Array.isArray(node)) return node.map((child: ReactNode) => findButton(child, label)).find(Boolean) ?? null
   if (!isValidElement<{ children?: ReactNode }>(node)) return null
@@ -111,16 +127,21 @@ const findButton = (node: ReactNode, label: string): Clickable | null => {
   return findButton(node.props.children, label)
 }
 
-const markAllRead = async () => {
-  const button = findButton(rendered(), 'Mark all read')
+// A click on whatever button with this label is now first: 0 clicks in a row for a key, 1 for a
+// single click, 2 for the second click of a double-click
+const click = async (label: string, detail = 1) => {
+  const button = findButton(rendered(), label)
   expect(button).not.toBeNull()
-  await button!.props.onClick!()
+  await button!.props.onClick!({ detail })
 }
+
+const markAllRead = () => click('Mark all read')
 
 beforeEach(() => {
   state.store.clear()
   state.commits = []
   state.errors = []
+  state.answered = []
 })
 
 describe('Mark all read', () => {
@@ -155,5 +176,102 @@ describe('Mark all read', () => {
     seed(60, () => true)
     expect(findButton(rendered(), 'Mark all read')).toBeNull()
     expect(markup()).not.toContain('notice--unread')
+  })
+})
+
+// Answering a request drops its row at once, so the next request slides up into its place and
+// its Accept and Not now sit right under the pointer
+describe('Waiting for you', () => {
+  const person = (id: string) => ({ penName: id, avatarSeed: id, pigment: 'sepia', pro: false, banned: false })
+
+  // Two requests waiting on alice, in the order the page lists them
+  const requests = () => {
+    for (const other of ['bob', 'carol']) {
+      state.store.set(`users/${other}`, person(other))
+      state.store.set(`connections/alice_${other}`, { uids: ['alice', other], requester: other, recipient: 'alice', status: 'pending' })
+    }
+  }
+
+  const status = (id: string) => state.store.get(`connections/${id}`)?.status
+
+  it('accepts only the request double-clicked, not the one that slides up under the second click', async () => {
+    requests()
+    await click('Accept', 1)
+    await click('Accept', 2)
+    expect(state.answered).toEqual([['accept', 'alice_bob']])
+    expect(status('alice_carol')).toBe('pending')
+  })
+
+  it('declines only the request double-clicked', async () => {
+    requests()
+    await click('Not now', 1)
+    await click('Not now', 2)
+    expect(state.answered).toEqual([['remove', 'alice_bob']])
+    expect(status('alice_carol')).toBe('pending')
+  })
+
+  it('still answers each request clicked or pressed in its own turn', async () => {
+    requests()
+    await click('Accept', 0)
+    await click('Not now', 1)
+    expect(state.answered).toEqual([
+      ['accept', 'alice_bob'],
+      ['remove', 'alice_carol'],
+    ])
+  })
+
+  it('marks nothing read from the second click of a double-click', async () => {
+    seed(3, () => false)
+    await click('Mark all read', 2)
+    expect(state.commits).toEqual([])
+    expect(railCount()).toBe(3)
+  })
+})
+
+// The crisis note says the resources below are always here, and for writing held in a group
+// it can be the only place left that shows them once a moderator has read it
+describe('A crisis notice', () => {
+  for (const seen of [false, true]) {
+    it(`shows the support lines under it ${seen ? 'after' : 'before'} it is read`, () => {
+      state.store.set('users/alice/notices/n0', { type: 'crisis', createdAt: at(Date.now()), seen })
+      const html = markup()
+      expect(html).toContain('The resources below are always here.')
+      expect(html).toContain('If you need someone right now')
+      expect(html).toContain('href="tel:988"')
+    })
+  }
+})
+
+// Reset profile is sent as 'removed' too, pointing at the profile itself. No group and no writing
+// was involved: the person has to hear that their name and note were reset, and where to choose again
+describe('A removed notice', () => {
+  const removed = (contentPath: string) => {
+    state.store.set('users/alice/notices/n0', { type: 'removed', contentPath, note: 'Please don’t use a real clinic’s name.', createdAt: at(Date.now()), seen: false })
+  }
+
+  it('says a moderator reset the pen name and note, when it points at the profile', () => {
+    removed('users/alice')
+    const html = markup()
+    expect(html).toContain('A moderator reset your pen name and note')
+    expect(html).toContain('href="/me"')
+    expect(html).toContain('Note from the moderator: Please don’t use a real clinic’s name.')
+    expect(html).not.toContain('removed something you wrote')
+    expect(html).not.toContain('group’s guidelines')
+  })
+
+  // Reset retires the reported name only while nobody else holds it, and frees a name they renamed
+  // to since, so the name they last went by can be theirs again: the note mustn't say it's gone
+  it('says only that the reported name may not be available again', () => {
+    removed('users/alice')
+    const html = markup()
+    expect(html).not.toContain('Your old name can’t be used again')
+    expect(html).toContain('The name that was reported may not be available again.')
+  })
+
+  it('still says writing was removed, when it points at writing', () => {
+    removed('groups/g1/posts/p1')
+    const html = markup()
+    expect(html).toContain('A moderator removed something you wrote, because it didn’t fit the group’s guidelines.')
+    expect(html).not.toContain('reset your pen name')
   })
 })

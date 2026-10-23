@@ -39,10 +39,12 @@ export const Talk = ({
   const messages = useLiveContent<Message>(path, me, { direction: 'asc', max: 80 })
   const end = useRef<HTMLDivElement>(null)
   const field = useRef<HTMLTextAreaElement>(null)
+  // A full window keeps its length as a new message pushes the oldest out, so the newest counts too
+  const newest = messages.data.at(-1)?.id
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'nearest' })
-  }, [messages.data.length])
+  }, [messages.data.length, newest])
 
   const send = async (text: string, _title: string | undefined, mentions: string[]) => {
     await addDoc(collection(db, path), {

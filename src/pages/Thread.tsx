@@ -1,6 +1,6 @@
 import { addDoc, collection, query, serverTimestamp, where } from 'firebase/firestore'
 import { useEffect, useRef } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { Arrivals } from '../components/Arrivals'
 import { Composer } from '../components/Composer'
@@ -13,11 +13,13 @@ import { useDocData, useLiveContent, useQueryData } from '../lib/live'
 import { findById } from '../lib/lookup'
 import { otherInPair } from '../lib/pair'
 import { isPairFor } from '../lib/pairFor'
+import { hereOf } from '../lib/returnTo'
 import type { Connection, Message, Profile } from '../lib/types'
 
 export const Thread = () => {
   const { pairId = '' } = useParams()
   const { uid, claims } = useMe()
+  const location = useLocation()
   const participant = isPairFor(pairId, uid)
   const otherUid = otherInPair(pairId, uid)
 
@@ -32,16 +34,18 @@ export const Thread = () => {
   const messages = useLiveContent<Message>(open ? `dms/${pairId}/messages` : null, uid, { direction: 'asc', max: 200 })
   const end = useRef<HTMLDivElement>(null)
   const field = useRef<HTMLTextAreaElement>(null)
+  // A full window keeps its length as a new note pushes the oldest out, so the newest counts too
+  const newest = messages.data.at(-1)?.id
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'nearest' })
-  }, [messages.data.length])
+  }, [messages.data.length, newest])
 
   if (!participant) return <Quiet>This conversation isn’t yours to open.</Quiet>
   if (!claims.emailVerified) {
     return (
       <Quiet>
-        Confirm your email to open private notes. <Link to="/verify">Confirm email</Link>
+        Confirm your email to open private notes. <Link to="/verify" state={{ from: hereOf(location) }}>Confirm email</Link>
       </Quiet>
     )
   }

@@ -8,7 +8,22 @@ import { Group } from './Group'
 // let them read posts and comments. A post without a title has no title link, so the
 // comment link is their only way to the whole post and its comments.
 
-const state = vi.hoisted(() => ({ verified: false, membership: 'confirmed' as 'confirmed' | 'pending' | 'none' }))
+const post = (id: string, commentCount?: number) => ({
+  id,
+  path: `groups/g1/posts/${id}`,
+  authorUid: 'bob',
+  author: { penName: 'Bob', avatarSeed: 'bob', pigment: 'ultramarine' },
+  status: 'published',
+  createdAt: null,
+  body: 'a long night '.repeat(60),
+  ...(commentCount === undefined ? {} : { commentCount }),
+})
+
+const state = vi.hoisted(() => ({
+  verified: false,
+  membership: 'confirmed' as 'confirmed' | 'pending' | 'none',
+  posts: [] as unknown[],
+}))
 
 vi.mock('../lib/firebase', () => ({ db: {}, auth: {}, LOCAL_BACKEND: true }))
 vi.mock('../lib/callables', () => ({ describeError: vi.fn() }))
@@ -26,22 +41,7 @@ vi.mock('../lib/live', () => ({
     return { data: (path && docs[path]) ?? null, loading: false, error: null, pending }
   },
   useQueryData: () => ({ data: [], loading: false, error: null }),
-  useLiveContent: () => ({
-    data: [
-      {
-        id: 'p1',
-        path: 'groups/g1/posts/p1',
-        authorUid: 'bob',
-        author: { penName: 'Bob', avatarSeed: 'bob', pigment: 'ultramarine' },
-        status: 'published',
-        createdAt: null,
-        body: 'a long night '.repeat(60),
-        commentCount: 3,
-      },
-    ],
-    loading: false,
-    error: null,
-  }),
+  useLiveContent: () => ({ data: state.posts, loading: false, error: null }),
 }))
 
 const openPosts = () =>
@@ -56,6 +56,7 @@ const openPosts = () =>
 beforeEach(() => {
   state.verified = false
   state.membership = 'confirmed'
+  state.posts = [post('p1', 3)]
 })
 
 describe('an untitled post in the group list', () => {
@@ -73,6 +74,18 @@ describe('an untitled post in the group list', () => {
     const html = openPosts()
     expect(html).toContain('href="/groups/g1/posts/p1"')
     expect(html).toContain('aria-label="Like"')
+  })
+})
+
+describe('the comment link on a post card', () => {
+  // The icon is hidden, so the label is the whole name a screen reader reads
+  it('says Comment with none, and counts one comment as singular', () => {
+    state.posts = [post('none'), post('zero', 0), post('one', 1), post('two', 2)]
+    const html = openPosts()
+    expect(html.match(/aria-label="Comment"/g)).toHaveLength(2)
+    expect(html).toContain('aria-label="1 comment"')
+    expect(html).toContain('aria-label="2 comments"')
+    expect(html).not.toContain('1 comments')
   })
 })
 

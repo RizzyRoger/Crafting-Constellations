@@ -32,7 +32,11 @@ export const AdminClaim = () => {
       <PageHead title="Review" kicker="Moderators only" lede="This sheet is for the people who review flagged writing and licence applications." seed={11} />
       <div className="stack" style={{ maxWidth: 520 }}>
         <p className="pencil note">If your confirmed email is on the moderator list, you can open it here.</p>
-        {error && <p className="error">{error}</p>}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
         <div className="row">
           <button type="button" className="act" onClick={() => void claim()}>
             I’m on the moderator list

@@ -1,6 +1,6 @@
 import { collection, query, where } from 'firebase/firestore'
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { PageHead } from '../components/PageHead'
 import { Quiet } from '../components/Quiet'
@@ -11,6 +11,7 @@ import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import { findById } from '../lib/lookup'
 import { among } from '../lib/people'
+import { hereOf } from '../lib/returnTo'
 import { leaveChat } from '../lib/social'
 import type { Chat as ChatDoc, Profile } from '../lib/types'
 import { HEAD_DESCENDING } from '../wash/strokes'
@@ -20,6 +21,7 @@ export const Chat = () => {
   const { chatId = '' } = useParams()
   const { uid, claims } = useMe()
   const navigate = useNavigate()
+  const location = useLocation()
   const verified = claims.emailVerified
   const [leaving, setLeaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -37,7 +39,7 @@ export const Chat = () => {
   if (!verified) {
     return (
       <Quiet>
-        Confirm your email to open private chats. <Link to="/verify">Confirm email</Link>
+        Confirm your email to open private chats. <Link to="/verify" state={{ from: hereOf(location) }}>Confirm email</Link>
       </Quiet>
     )
   }
@@ -81,7 +83,11 @@ export const Chat = () => {
         </div>
       </PageHead>
 
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
 
       {/* Keyed on the chat: moving to another keeps this page mounted, and a draft or its @mentions must not follow you there */}
       <Talk

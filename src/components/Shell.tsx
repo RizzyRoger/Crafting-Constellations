@@ -5,12 +5,15 @@ import { useAuth } from '../auth/AuthProvider'
 import { useSignOut } from '../auth/useSignOut'
 import { personAddress } from '../constellation/personAddress'
 import { CHOOSE } from '../constellation/sheetReveal'
-import { CheckIn } from './CheckIn'
-import { CHECKIN_GROUP } from '../lib/checkin'
+import { CheckIn, useCheckInDraft } from './CheckIn'
+import { CHECKIN_GROUP, checkInJoin, promptFits } from '../lib/checkin'
 import { db } from '../lib/firebase'
+import { focusForNow } from '../lib/focusForNow'
 import { useDocData, useQueryData } from '../lib/live'
 import { otherInPair } from '../lib/pair'
+import { penNameSearchTerm } from '../lib/penNameSearch'
 import { visibleById, waitingOn } from '../lib/people'
+import { hereOf } from '../lib/returnTo'
 import { joinGroup } from '../lib/social'
 import type { Chat, Connection, Group, Membership, Notice, Profile } from '../lib/types'
 import { Blot } from '../wash/Blot'
@@ -101,7 +104,8 @@ const Rail = () => {
   const partners = useQueryData<Profile>(uid && partnerIds.length ? `rail-partners|${partnerIds.join(',')}` : null, () =>
     query(collection(db, 'users'), where(documentId(), 'in', partnerIds)),
   )
-  const needle = queryText.trim().toLowerCase()
+  // Tidied as pen names are stored, so a phone's curly apostrophe still finds O'Neil
+  const needle = penNameSearchTerm(queryText)
   const search = useQueryData<Profile>(uid && needle ? `rail-search|${needle}` : null, () =>
     query(collection(db, 'users'), orderBy('penNameLower'), startAt(needle), endAt(`${needle}\uf8ff`), limit(8)),
   )
@@ -149,7 +153,7 @@ const Rail = () => {
 
       <Disclosure label="Private chats" open={chatsOpen} onToggle={setChatsOpen}>
         {!verified ? (
-          <Link to="/verify" className="disc__empty">
+          <Link to="/verify" state={{ from: hereOf(location) }} className="disc__empty">
             Confirm email to open chats
           </Link>
         ) : sortedThreads.length === 0 && myChats.length === 0 ? (
@@ -205,7 +209,7 @@ const Rail = () => {
           </Link>
         )}
         {!verified && (
-          <Link to="/verify" className="disc__empty">
+          <Link to="/verify" state={{ from: hereOf(location) }} className="disc__empty">
             Confirm your email to write privately.
           </Link>
         )}
@@ -228,16 +232,17 @@ const JoinCheckIn = () => {
   const uid = user?.uid ?? null
   const group = useDocData<{ name: string }>(uid && profile ? `groups/${CHECKIN_GROUP}` : null)
   const membership = useDocData<{ uid: string }>(uid && profile ? `groups/${CHECKIN_GROUP}/members/${uid}` : null)
-  const tried = useRef(false)
+  const decided = useRef(false)
 
   useEffect(() => {
-    if (!uid || !profile || tried.current) return
-    if (group.loading || membership.loading || membership.pending) return
-    if (!group.data || membership.data) return
-    tried.current = true
-    void joinGroup(CHECKIN_GROUP, uid).catch(() => {
-      tried.current = false
-    })
+    if (!uid || !profile) return
+    const step = checkInJoin(decided.current, group, membership)
+    if (step === 'wait') return
+    decided.current = true
+    // A refused join is refused again at once, so it waits for the next visit
+    if (step === 'join') void joinGroup(CHECKIN_GROUP, uid).catch(() => {})
+    // group and membership are new objects each render; these are what they hold
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, profile, group.loading, group.data, membership.loading, membership.data, membership.pending])
 
   return null
@@ -246,14 +251,24 @@ const JoinCheckIn = () => {
 export const Shell = ({ children }: { children: ReactNode }) => {
   const location = useLocation()
   const [later, setLater] = useState(false)
-  const onMe = location.pathname === '/me'
+  // Kept here, where it lasts from page to page: what was typed in the prompt, or what it sent and
+  // became, is still there after a page that leaves the prompt out. It goes with the person, since
+  // the gate takes the shell down when who's signed in changes
+  const draft = useCheckInDraft()
+  const main = useRef<HTMLElement>(null)
+
+  // The prompt's focused button goes with it, so focus comes to the page instead of falling out
+  const setAside = () => {
+    if (main.current) focusForNow(main.current)
+    setLater(true)
+  }
 
   return (
     <div className="shell">
       <Rail />
-      <main className="shell__main" id="main">
+      <main className="shell__main" id="main" ref={main}>
         <JoinCheckIn />
-        {!later && !onMe && <CheckIn prompt onLater={() => setLater(true)} />}
+        {!later && promptFits(location.pathname) && <CheckIn prompt draft={draft} onLater={setAside} />}
         {children}
       </main>
     </div>

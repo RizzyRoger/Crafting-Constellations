@@ -1,6 +1,6 @@
 import { collection, limit, orderBy, query, where } from 'firebase/firestore'
 import { getBlob, ref } from 'firebase/storage'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { refusedAsModerator } from '../auth/moderator'
@@ -10,9 +10,12 @@ import { approveContent, banUser, describeError, problemOf, removeContent, revie
 import { db, storage } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import { openInNewTab } from '../lib/newTab'
+import { penNameSearchTerm } from '../lib/penNameSearch'
+import { readsReports, reportDetails } from '../lib/reportDetails'
 import { outcomeNote } from '../lib/reviewOutcome'
+import { roleFocus, type RoleChange } from '../lib/roleQuestion'
 import { ago } from '../lib/time'
-import type { ProApplication, Profile, QueueItem } from '../lib/types'
+import type { FiledReport, ProApplication, Profile, QueueItem } from '../lib/types'
 
 type Tab = 'queue' | 'pros' | 'people'
 
@@ -51,10 +54,18 @@ const useAction = () => {
   return { busy, error, run }
 }
 
+// Every report on the writing, read from the reports themselves and not copied to the queue item:
+// deleting an account deletes its reports, so what they wrote goes with it
+const reportsOn = (path: string) => query(collection(db, 'reports'), where('contentPath', '==', path))
+
 const QueueEntry = ({ item, tell }: { item: QueueItem; tell: (outcome?: ModOutcome) => void }) => {
+  const { uid } = useMe()
   const { busy, error, run } = useAction()
   const [note, setNote] = useState('')
   const decide = (action: () => Promise<{ outcome?: ModOutcome }>) => run(async () => tell((await action()).outcome))
+  const reads = readsReports(item, uid)
+  const filed = useQueryData<FiledReport>(reads ? `admin-reports|${item.contentPath}` : null, () => reportsOn(item.contentPath))
+  const wrote = reportDetails(item, filed.data, uid)
   const crisis = item.automod?.crisis || item.reports?.reasons.includes('selfHarm')
   const where = item.groupId ? (
     <Link to={`/groups/${item.groupId}`}>{item.groupId}</Link>
@@ -67,7 +78,7 @@ const QueueEntry = ({ item, tell }: { item: QueueItem; tell: (outcome?: ModOutco
   )
 
   return (
-    <li className="stack" style={{ gap: 10 }}>
+    <li className="stack admin-entry" style={{ gap: 10 }}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <span className="code">
           {crisis && <strong className="circled">crisis</strong>} {KIND[item.kind]} · {where} · {item.authorPenName || 'unknown'} · {ago(item.createdAt)}
@@ -82,6 +93,25 @@ const QueueEntry = ({ item, tell }: { item: QueueItem; tell: (outcome?: ModOutco
       {item.automod?.matches.length ? (
         <p className="meta">matched: {item.automod.matches.map((m) => `“${m.term}” (${m.category})`).join(', ')}</p>
       ) : null}
+      {wrote.length > 0 && (
+        <>
+          <p className="meta">reporters wrote:</p>
+          <dl className="admin-dl">
+            {wrote.map((report) => (
+              <Fragment key={report.id}>
+                <dt>{report.reason}</dt>
+                <dd>{report.details}</dd>
+              </Fragment>
+            ))}
+          </dl>
+        </>
+      )}
+      {filed.error && (
+        <p className="error" role="alert">
+          Couldn’t read what reporters wrote. {describeError(filed.error)}
+        </p>
+      )}
+      {item.reports && !reads && <p className="meta">This is about you, so what reporters wrote is left for another moderator.</p>}
       {item.kind === 'dm' && item.delivered && <p className="meta">Delivered to the other person with crisis resources shown to both.</p>}
       {item.kind === 'chatMessage' && item.delivered && <p className="meta">Delivered to the chat with crisis resources shown to everyone in it.</p>}
       <div className="row">
@@ -93,7 +123,11 @@ const QueueEntry = ({ item, tell }: { item: QueueItem; tell: (outcome?: ModOutco
           {item.kind === 'profile' ? 'Reset profile' : 'Remove'}
         </button>
       </div>
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </li>
   )
 }
@@ -109,7 +143,7 @@ const Queue = () => {
     const note = outcomeNote(outcome, item.kind)
     setSaid(note ? `${KIND[item.kind]} · ${item.authorPenName || 'unknown'} — ${note}` : '')
   }
-  if (queue.error) return <p className="error">{describeError(queue.error)}</p>
+  if (queue.error) return <p className="error" role="alert">{describeError(queue.error)}</p>
   return (
     <div className="stack">
       {/* Mounted from the start, so screen readers announce the note when it lands */}
@@ -205,7 +239,7 @@ const Application = ({ app, person }: { app: ProApplication & { id: string }; pe
         </p>
       )}
       {docs.error && (
-        <p className="error">
+        <p className="error" role="alert">
           Couldn’t open {docs.tried}. {docs.error}
         </p>
       )}
@@ -218,7 +252,11 @@ const Application = ({ app, person }: { app: ProApplication & { id: string }; pe
           Deny
         </button>
       </div>
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </li>
   )
 }
@@ -233,7 +271,11 @@ const LicensedPro = ({ pro }: { pro: Profile }) => {
           Revoke mark
         </button>
       </div>
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </li>
   )
 }
@@ -271,8 +313,6 @@ const Pros = () => {
   )
 }
 
-type RoleChange = 'make' | 'remove'
-
 // Profiles don't say who moderates (everyone can read them), so both changes are offered. Each
 // asks first, then says what it did, or that nothing needed doing
 const ROLE: Record<RoleChange, { ask: string; done: string; already: string }> = {
@@ -294,6 +334,18 @@ const PersonAdmin = ({ person, me }: { person: Profile; me: string }) => {
   const [hide, setHide] = useState(false)
   const [asking, setAsking] = useState<RoleChange | null>(null)
   const [said, setSaid] = useState<string | null>(null)
+  const question = useRef<HTMLSpanElement>(null)
+  const make = useRef<HTMLButtonElement>(null)
+  const remove = useRef<HTMLButtonElement>(null)
+  // The change last asked about, so focus can go back to its button
+  const asked = useRef<RoleChange | null>(null)
+  useEffect(() => {
+    const to = roleFocus(asking, asked.current)
+    asked.current = asking
+    if (!to) return
+    const target = { question, make, remove }[to]
+    target.current?.focus()
+  }, [asking])
   const ask = (change: RoleChange) => () => {
     setAsking(change)
     setSaid(null)
@@ -333,9 +385,12 @@ const PersonAdmin = ({ person, me }: { person: Profile; me: string }) => {
                 Ban
               </button>
             </div>
+            {/* Keyed, so Yes is a button of its own, never the one just pressed reused in place */}
             {asking ? (
-              <div className="row">
-                <span className="pencil">{ROLE[asking].ask}</span>
+              <div key="ask" className="row">
+                <span ref={question} tabIndex={-1} className="pencil">
+                  {ROLE[asking].ask}
+                </span>
                 <button type="button" className="act act--quiet" disabled={busy} onClick={changeRole(asking)}>
                   Yes
                 </button>
@@ -344,26 +399,33 @@ const PersonAdmin = ({ person, me }: { person: Profile; me: string }) => {
                 </button>
               </div>
             ) : (
-              <div className="row">
-                <button type="button" className="link-btn" disabled={busy} onClick={ask('make')}>
+              <div key="idle" className="row">
+                <button ref={make} type="button" className="link-btn" disabled={busy} onClick={ask('make')}>
                   Make moderator
                 </button>
-                <button type="button" className="link-btn" disabled={busy} onClick={ask('remove')}>
+                <button ref={remove} type="button" className="link-btn" disabled={busy} onClick={ask('remove')}>
                   Remove moderator
                 </button>
               </div>
             )}
-            {said && <p className="meta">{said}</p>}
+            {/* Mounted from the start, so screen readers announce what the change did when it lands */}
+            <p className="meta live" role="status">
+              {said}
+            </p>
           </>
         ))}
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </li>
   )
 }
 
 const People = ({ me }: { me: string }) => {
   const [search, setSearch] = useState('')
-  const term = search.trim().toLowerCase()
+  const term = penNameSearchTerm(search)
   const results = useQueryData<Profile>(term.length >= 2 ? `admin-people|${term}` : null, () =>
     query(collection(db, 'users'), where('penNameLower', '>=', term), where('penNameLower', '<=', `${term}`), limit(20)),
   )

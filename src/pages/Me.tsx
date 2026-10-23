@@ -1,5 +1,5 @@
 import { collection, query, where } from 'firebase/firestore'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { useSignOut } from '../auth/useSignOut'
 import { CheckIn } from '../components/CheckIn'
@@ -7,9 +7,11 @@ import { PageHead } from '../components/PageHead'
 import { ProfileForm } from '../components/ProfileForm'
 import { Who } from '../components/Who'
 import { db } from '../lib/firebase'
+import { isFirstClick } from '../lib/groupStanding'
 import { useQueryData } from '../lib/live'
 import { otherInPair } from '../lib/pair'
 import { visibleById, waitingOn, withVisible } from '../lib/people'
+import { hereOf } from '../lib/returnTo'
 import { acceptConnection, blockConnection, removeConnection } from '../lib/social'
 import { setCountVisits, TELEMETRY_AVAILABLE, useCountVisits } from '../lib/telemetry'
 import type { Connection, Profile } from '../lib/types'
@@ -17,6 +19,7 @@ import type { Connection, Profile } from '../lib/types'
 export const Me = () => {
   const { uid, profile, claims, user } = useMe()
   const signOut = useSignOut()
+  const location = useLocation()
   const countVisits = useCountVisits()
 
   const connections = useQueryData<Connection>(`connections|${uid}`, () =>
@@ -31,6 +34,12 @@ export const Me = () => {
   const outgoing = withVisible(connections.data.filter((c) => c.status === 'pending' && c.requester === uid), visible, uid)
   const friends = withVisible(connections.data.filter((c) => c.status === 'accepted'), visible, uid)
   const blocked = connections.data.filter((c) => c.status === 'blocked' && c.blockedBy === uid)
+
+  // Only a first click (or a key) acts. Each of these moves its row or drops it at once, and the
+  // next row's button slides up under the second click of a double-click
+  const onFirstClick = (work: () => Promise<unknown>) => (e: { detail: number }) => {
+    if (isFirstClick(e.detail)) void work()
+  }
 
   const personOf = (c: Connection) => {
     const p = byId.get(otherInPair(c.id, uid))
@@ -66,10 +75,10 @@ export const Me = () => {
                 {personOf(c)}
                 <span className="row">
                   <span className="meta">wants to connect</span>
-                  <button type="button" className="act act--quiet act--wash" disabled={!claims.emailVerified} onClick={() => void acceptConnection(c.id)}>
+                  <button type="button" className="act act--quiet act--wash" disabled={!claims.emailVerified} onClick={onFirstClick(() => acceptConnection(c.id))}>
                     Accept
                   </button>
-                  <button type="button" className="link-btn" onClick={() => void removeConnection(c.id)}>
+                  <button type="button" className="link-btn" onClick={onFirstClick(() => removeConnection(c.id))}>
                     Not now
                   </button>
                 </span>
@@ -80,7 +89,7 @@ export const Me = () => {
                 {personOf(c)}
                 <span className="row">
                   <span className="meta">request sent</span>
-                  <button type="button" className="link-btn" onClick={() => void removeConnection(c.id)}>
+                  <button type="button" className="link-btn" onClick={onFirstClick(() => removeConnection(c.id))}>
                     Cancel
                   </button>
                 </span>
@@ -93,10 +102,10 @@ export const Me = () => {
                   <Link to={`/messages/${c.id}`} className="link-btn">
                     Write
                   </Link>
-                  <button type="button" className="link-btn" onClick={() => void removeConnection(c.id)}>
+                  <button type="button" className="link-btn" onClick={onFirstClick(() => removeConnection(c.id))}>
                     Disconnect
                   </button>
-                  <button type="button" className="link-btn" onClick={() => void blockConnection(c.id, uid)}>
+                  <button type="button" className="link-btn" onClick={onFirstClick(() => blockConnection(c.id, uid))}>
                     Block
                   </button>
                 </span>
@@ -105,7 +114,7 @@ export const Me = () => {
             {blocked.map((c) => (
               <li key={c.id} className="row" style={{ justifyContent: 'space-between' }}>
                 {personOf(c)}
-                <button type="button" className="link-btn" onClick={() => void removeConnection(c.id)}>
+                <button type="button" className="link-btn" onClick={onFirstClick(() => removeConnection(c.id))}>
                   Unblock
                 </button>
               </li>
@@ -113,7 +122,7 @@ export const Me = () => {
           </ul>
           {!claims.emailVerified && incoming.length > 0 && (
             <p className="hint">
-              <Link to="/verify">Confirm your email</Link> to accept requests.
+              <Link to="/verify" state={{ from: hereOf(location) }}>Confirm your email</Link> to accept requests.
             </p>
           )}
         </section>
@@ -133,7 +142,7 @@ export const Me = () => {
         </div>
         <p className="pencil note">
           Signed in as {user.email ?? 'a Google account'} — only you see this.{' '}
-          {claims.emailVerified ? 'Email confirmed.' : <Link to="/verify">Confirm your email.</Link>}
+          {claims.emailVerified ? 'Email confirmed.' : <Link to="/verify" state={{ from: hereOf(location) }}>Confirm your email.</Link>}
         </p>
         {TELEMETRY_AVAILABLE && (
           <label className="code row" style={{ gap: 6 }}>

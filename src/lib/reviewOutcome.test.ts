@@ -1,7 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
+import type { Outcome } from '../../functions/src/adminPolicy'
+import type { ModOutcome } from './callables'
 import { outcomeNote } from './reviewOutcome'
 
 describe('outcomeNote', () => {
+  it('knows every outcome the backend gives (checked by tsc)', () => {
+    expectTypeOf<Outcome>().toExtend<ModOutcome>()
+  })
+
   it('says nothing when Approve or Remove did what its button says', () => {
     expect(outcomeNote('published', 'post')).toBeNull()
     expect(outcomeNote('restored', 'comment')).toBeNull()
@@ -16,8 +22,17 @@ describe('outcomeNote', () => {
   })
 
   it('says an approved private note was never delivered, and why', () => {
-    expect(outcomeNote('undelivered', 'dm')).toBe('Approved, but not delivered: they’re no longer connected, so it stays held.')
     expect(outcomeNote('undelivered', 'chatMessage')).toBe('Approved, but not delivered: the writer is no longer in the chat, so it stays held.')
+  })
+
+  it('never says two people are disconnected now: a note that arrived while they weren’t stays held once they reconnect', () => {
+    expect(outcomeNote('undelivered', 'dm')).toBe('Approved, but not delivered: they weren’t connected when it arrived, or aren’t now, so it stays held.')
+  })
+
+  it('says an approved note from a banned writer stays held', () => {
+    for (const kind of ['post', 'comment', 'groupMessage', 'dm', 'chatMessage'] as const) {
+      expect(outcomeNote('paused', kind)).toBe('Approved, but not delivered: they’re banned, so it stays held.')
+    }
   })
 
   it('says when the writer had already withdrawn it', () => {

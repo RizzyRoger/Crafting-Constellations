@@ -1,5 +1,5 @@
 import { collection, query, where, type Timestamp } from 'firebase/firestore'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { PageHead } from '../components/PageHead'
 import { Who } from '../components/Who'
@@ -7,6 +7,7 @@ import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import { otherInPair } from '../lib/pair'
 import { visibleById, withVisible } from '../lib/people'
+import { hereOf } from '../lib/returnTo'
 import { ago } from '../lib/time'
 import type { Connection, Profile } from '../lib/types'
 import { HEAD_DESCENDING } from '../wash/strokes'
@@ -21,6 +22,7 @@ interface Thread {
 // Private notes: threads with people you've connected with
 export const Messages = () => {
   const { uid, claims } = useMe()
+  const location = useLocation()
   const verified = claims.emailVerified
 
   const connections = useQueryData<Connection>(`connections|${uid}`, () =>
@@ -52,7 +54,7 @@ export const Messages = () => {
       {!verified ? (
         <div className="banner">
           <p className="pencil note">Private notes open once your email is confirmed. It keeps everyone here a bit safer.</p>
-          <Link to="/verify" className="act act--wash" style={{ justifySelf: 'start' }}>
+          <Link to="/verify" state={{ from: hereOf(location) }} className="act act--wash" style={{ justifySelf: 'start' }}>
             Confirm email
           </Link>
         </div>

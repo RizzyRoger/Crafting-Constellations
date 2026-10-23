@@ -30,3 +30,11 @@ describe('a long pen name', () => {
     },
   )
 })
+
+// The same at 375px for other single long words: a post titled with a link's whole address (a card
+// 461px wide), a chat named with one 29-letter word in the page head, a 32-letter pen name on You
+describe('a long title or name', () => {
+  it.each(['.post__title', '.page-head h1', '.person__name'])('breaks rather than widening the page in %s', (selector) => {
+    expect(declares(selector, 'overflow-wrap', 'anywhere')).toBe(true)
+  })
+})

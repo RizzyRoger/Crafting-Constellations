@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { useAuth } from '../auth/AuthProvider'
+import { isFirstClick } from '../lib/groupStanding'
 import { ago } from '../lib/time'
 import type { AuthorSnapshot, Content } from '../lib/types'
 import { canWithdraw, withdraw } from '../lib/withdraw'
@@ -40,7 +41,15 @@ export const Item = ({ item, me, children, actions, blotSize = 24, className = '
       {mine ? (
         // Already withdrawn or removed: the rules refuse it again
         canWithdraw(item.status) && (
-          <button type="button" className="link-btn" onClick={() => void takeBack()}>
+          // Withdrawn writing drops out of the list at once, so only a first click (or a key) acts: the
+          // second click of a double-click would land on the next of mine and take it back for good
+          <button
+            type="button"
+            className="link-btn"
+            onClick={(e) => {
+              if (isFirstClick(e.detail)) void takeBack()
+            }}
+          >
             Withdraw
           </button>
         )
@@ -57,7 +66,8 @@ export const Item = ({ item, me, children, actions, blotSize = 24, className = '
 
   const crisis = (
     <>
-      {mine && item.status === 'held' && item.heldReason === 'crisis' && <CrisisCard audience="writer" held />}
+      {/* Undelivered writing never reaches others, so its card keeps the resources but not 'before others see it' */}
+      {mine && item.status === 'held' && item.heldReason === 'crisis' && <CrisisCard audience="writer" held={!item.undelivered} />}
       {privateThread && item.crisis && <CrisisCard audience={mine ? 'writer' : 'reader'} />}
     </>
   )

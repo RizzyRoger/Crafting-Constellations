@@ -90,6 +90,13 @@ export const egoCircle = ({ me, friendships, pending, blocked = [] }: Pick<EgoIn
   return { friends: friendSet, pending: pendingSet, through }
 }
 
+// No friend or request of yours for the chart to draw, however many other people are friends:
+// the chart would be one dot, so the page welcomes you instead
+export const chartIsEmpty = (input: Pick<EgoInput, 'me' | 'friendships' | 'pending' | 'blocked'>) => {
+  const { friends, pending } = egoCircle(input)
+  return friends.size === 0 && pending.size === 0
+}
+
 export const layoutEgo = ({ width, height, me, friendships, pending, blocked = [], sharedGroups }: EgoInput): EgoLayout => {
   const { friends: friendSet, pending: pendingSet, through } = egoCircle({ me, friendships, pending, blocked })
   const direct = new Set([...friendSet, ...pendingSet])

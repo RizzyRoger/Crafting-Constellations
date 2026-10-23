@@ -15,3 +15,8 @@ export const returnTo = (state: unknown, fallback = '/constellation') => {
     return fallback
   }
 }
+
+// Where Verify's Continue and Later go: back to the page that asked for a confirmed email (see
+// ConfirmEmail). Someone with no pen name yet chooses one first, and that page is carried on
+export const afterVerify = (hasProfile: boolean, state: unknown): { to: string; state?: unknown } =>
+  hasProfile ? { to: returnTo(state) } : { to: '/onboarding', state }
