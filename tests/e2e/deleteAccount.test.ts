@@ -339,4 +339,46 @@ describe('Reset profile', () => {
     await signInAs(w.friend)
     expect(await problemOf(saveProfile({ penName: w.leaverName }))).toEqual(refused)
   })
+
+  // The friend reports the leaver's profile, and the trigger queues it under the name it has; then
+  // the leaver renames before a moderator gets to it, which frees the reported name
+  const renamedAfterReport = async () => {
+    const w = await seed()
+    const profile = `users/${w.leaver}`
+    await db.collection('reports').add({ reporterUid: w.friend, contentPath: profile, reason: 'impersonation', createdAt: new Date() })
+    await eventually(async () => (await field(queueDoc(profile), 'authorPenName')) === w.leaverName, 'the report to reach the queue')
+    const plainName = `Plain Fern ${w.n}`
+    await signInAs(w.leaver)
+    await expect(saveProfile({ penName: plainName })).resolves.toMatchObject({ data: { ok: true } })
+    expect(await exists(`penNames/leaving lark ${w.n}`)).toBe(false)
+    return { ...w, plainName }
+  }
+
+  it('retires the name the moderator was shown, though they renamed since, and frees the one nobody reported', async () => {
+    const w = await renamedAfterReport()
+    const fresh = await reset(w)
+    expect(fresh).not.toBe(w.plainName)
+    const refused = { code: 'functions/invalid-argument', problem: 'unkind' }
+
+    expect((await db.doc(`penNames/leaving lark ${w.n}`).get()).data()).toEqual({ retired: true })
+    await signInAs(w.leaver)
+    expect(await problemOf(saveProfile({ penName: w.leaverName }))).toEqual(refused)
+    await signInAs(w.friend)
+    expect(await problemOf(saveProfile({ penName: w.leaverName }))).toEqual(refused)
+
+    expect(await exists(`penNames/plain fern ${w.n}`)).toBe(false)
+    await expect(saveProfile({ penName: w.plainName })).resolves.toMatchObject({ data: { ok: true } })
+    expect((await db.doc(`penNames/plain fern ${w.n}`).get()).data()).toEqual({ uid: w.friend })
+  })
+
+  it('leaves the reported name with someone who took it after they renamed', async () => {
+    const w = await renamedAfterReport()
+    await signInAs(w.friend)
+    await expect(saveProfile({ penName: w.leaverName })).resolves.toMatchObject({ data: { ok: true } })
+
+    await reset(w)
+    expect((await db.doc(`penNames/leaving lark ${w.n}`).get()).data()).toEqual({ uid: w.friend })
+    expect(await field(`users/${w.friend}`, 'penName')).toBe(w.leaverName)
+    expect(await exists(`penNames/plain fern ${w.n}`)).toBe(false)
+  })
 })

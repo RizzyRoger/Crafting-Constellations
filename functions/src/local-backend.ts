@@ -6,18 +6,20 @@
  * - Watches Firestore for what the triggers would do: moderate pending writing
  *   (which also pings people), handle reports, mirror friendships and tell people
  *   their request was accepted, keep counters.
- * Everything here is safe to repeat, so a restart simply catches up.
+ * Everything here is safe to repeat, so a restart simply catches up. Stopping lets the calls
+ * under way finish first, and answers any that can't as interrupted.
  *
  *   npm --prefix functions run build
  *   GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json node functions/lib/local-backend.js
  *
  * Moderator emails come from functions/.env.<project-id> (or ADMIN_EMAILS in the environment).
  */
+import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { DocumentData, DocumentReference, Query, QuerySnapshot } from 'firebase-admin/firestore'
 import type { CallableFunction, CallableRequest } from 'firebase-functions/v2/https'
-import { earliestFirst, listParam, namesAnyone, statusBefore } from './localBackendPolicy.js'
+import { earliestFirst, firebaseConfigFor, listParam, namesAnyone, statusBefore, underWay, userOrNone, within } from './localBackendPolicy.js'
 
 // Must match the allow-list in firestore.rules (calls/{callId})
 const CALLABLES = [
@@ -39,6 +41,10 @@ const CALLABLES = [
 // deleting an account) long after the person left
 const CALL_TTL_MS = 30_000
 const CALL_CLEANUP_EVERY_MS = 10 * 60_000
+// On stopping (a restart, a reboot, a listener failing), calls under way get this long to finish,
+// then any still going is answered as interrupted: both within systemd's 90s before it kills us
+const STOP_WAIT_MS = 60_000
+const INTERRUPTED_WAIT_MS = 10_000
 
 const log = (...parts: unknown[]) => console.log(new Date().toISOString(), '[local-backend]', ...parts)
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -49,8 +55,7 @@ const prepareEnv = () => {
   const projectId = process.env.GCLOUD_PROJECT ?? (keyFile ? (JSON.parse(readFileSync(keyFile, 'utf8')).project_id as string) : undefined)
   if (!projectId) throw new Error('Set GOOGLE_APPLICATION_CREDENTIALS to the service-account key file.')
   process.env.GCLOUD_PROJECT = projectId
-  // No storageBucket: Storage isn't available without Blaze, so account deletion skips it
-  process.env.FIREBASE_CONFIG ??= JSON.stringify({ projectId })
+  process.env.FIREBASE_CONFIG = firebaseConfigFor(projectId, process.env)
   const params = fileURLToPath(new URL(`../.env.${process.env.FIRESTORE_EMULATOR_HOST ? 'local' : projectId}`, import.meta.url))
   if (existsSync(params)) process.loadEnvFile(params)
   process.env.ADMIN_EMAILS = listParam(process.env.ADMIN_EMAILS)
@@ -59,17 +64,19 @@ const prepareEnv = () => {
   return projectId
 }
 
-// Transient failures (network, contention) get a few more tries; the work is idempotent
-const retrying = async (what: string, work: () => Promise<unknown>, attempt = 1): Promise<void> => {
+// Transient failures (network, contention) get a few more tries; the work is idempotent.
+// Whether it went through in the end, so nothing is logged as done that never was.
+export const retrying = async (what: string, work: () => Promise<unknown>, attempt = 1): Promise<boolean> => {
   try {
     await work()
+    return true
   } catch (error) {
     if (attempt >= 5) {
       log(`gave up on ${what}:`, error)
-      return
+      return false
     }
     await sleep(attempt * 5000)
-    await retrying(what, work, attempt + 1)
+    return retrying(what, work, attempt + 1)
   }
 }
 
@@ -109,7 +116,7 @@ export const startLocalBackend = async () => {
   const watch = (name: string, query: Query, onChange: (snap: QuerySnapshot) => void) =>
     query.onSnapshot(onChange, (error) => {
       log(`listener "${name}" failed, exiting so the service restarts:`, error)
-      process.exit(1)
+      void stop().finally(() => process.exit(1))
     })
 
   // ---------- calls ----------
@@ -127,11 +134,14 @@ export const startLocalBackend = async () => {
   const run = async (call: DocumentData) => {
     const fn = (CALLABLES as readonly string[]).includes(call.name) ? functions[call.name as (typeof CALLABLES)[number]] : undefined
     if (!fn) throw new HttpsError('not-found', 'call')
-    const user = await auth.getUser(call.uid).catch(() => null)
+    const user = await userOrNone(auth.getUser(call.uid))
     if (!user || user.disabled) throw new HttpsError('unauthenticated', 'Sign in first.')
     const token = { ...user.customClaims, uid: user.uid, sub: user.uid, email: user.email, email_verified: user.emailVerified, auth_time: call.authTime }
     return fn.run({ data: call.data, auth: { uid: user.uid, token, rawToken: '' }, acceptsStreaming: false } as unknown as CallableRequest<unknown>)
   }
+
+  // This run's mark on the calls it takes on, so it only ever answers for its own as interrupted
+  const runner = randomUUID()
 
   const answer = async (ref: DocumentReference) => {
     // Claim it first, so a replayed snapshot or a second backend never runs it twice
@@ -141,7 +151,7 @@ export const startLocalBackend = async () => {
       if (!data || data.state !== 'new') return null
       // Aged on the server's clock, which also stamped createdAt: this machine's may be off
       const age = snap.readTime.toMillis() - (data.createdAt?.toMillis?.() ?? 0)
-      tx.update(ref, age > CALL_TTL_MS ? { state: 'expired' } : { state: 'running' })
+      tx.update(ref, age > CALL_TTL_MS ? { state: 'expired' } : { state: 'running', runner })
       return { call: data, age }
     })
     if (!claimed) return
@@ -156,9 +166,20 @@ export const startLocalBackend = async () => {
       (error: unknown) => ({ state: 'failed', error: errorOf(error) }),
     )
     // The site may already have given up and removed the call
-    await ref.update({ ...reply, answeredAt: FieldValue.serverTimestamp() }).catch(ignoreMissing)
-    log(`${call.name} ${reply.state} in ${Date.now() - started}ms`)
+    const written = await retrying(`answer to ${call.name}`, () => ref.update({ ...reply, answeredAt: FieldValue.serverTimestamp() }).catch(ignoreMissing))
+    log(`${call.name} ${reply.state} in ${Date.now() - started}ms${written ? '' : ', but the answer was never written'}`)
   }
+
+  // A call this run took on and can't finish: answered, so the site doesn't wait on it in vain
+  const interrupted = (ref: DocumentReference) =>
+    db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref)
+      if (snap.get('state') !== 'running' || snap.get('runner') !== runner) return
+      const error = { status: 'unavailable', message: 'The server stopped before it finished.' }
+      tx.update(ref, { state: 'failed', error, answeredAt: FieldValue.serverTimestamp() })
+    })
+
+  const answering = underWay<DocumentReference>()
 
   // Cut off on the server's clock (every read carries it), like the expiry above
   const removeStaleCalls = async () => {
@@ -255,9 +276,9 @@ export const startLocalBackend = async () => {
 
   // ---------- moderation ----------
 
-  // Each person's writing is judged one note at a time, earliest written first, as it would be
-  // live. The flood check counts only notes written before each one, so a burst judged newest
-  // first (or in id order, as snapshots list it) would slip past it.
+  // Each person's writing is judged one note at a time, earliest written first. The flood check
+  // counts the notes written before each one, and only those within a minute after it, so a
+  // longer run judged newest first (or in id order, as snapshots list it) would slip past it.
   const inWrittenOrder = earliestFirst()
   const moderateInOrder = (snap: QuerySnapshot) =>
     snap
@@ -274,7 +295,7 @@ export const startLocalBackend = async () => {
       snap
         .docChanges()
         .filter((change) => change.type === 'added')
-        .forEach((change) => void answer(change.doc.ref).catch((error: unknown) => log('answering failed:', error))),
+        .forEach((change) => answering.add(change.doc.ref, answer(change.doc.ref).catch((error: unknown) => log('answering failed:', error)))),
     ),
     ...['posts', 'comments', 'messages'].map((group) =>
       watch(`pending ${group}`, db.collectionGroup(group).where('status', '==', 'pending'), moderateInOrder),
@@ -291,21 +312,29 @@ export const startLocalBackend = async () => {
   void removeStaleCalls()
   log(`running for ${projectId}`)
 
-  return {
-    stop: () => {
+  // Stops listening, then lets the calls under way finish (a restart shouldn't leave an account
+  // half deleted, or the site waiting on an answer that never comes). A second call waits on the first.
+  let stopping: Promise<void> | undefined
+  const stop = (waitMs = STOP_WAIT_MS) =>
+    (stopping ??= (async () => {
       clearInterval(cleanup)
-      stops.forEach((stop) => stop())
-    },
-  }
+      stops.forEach((unsubscribe) => unsubscribe())
+      const unfinished = await answering.settle(waitMs)
+      if (unfinished.length === 0) return
+      log(`answering ${unfinished.length} call(s) still running after ${waitMs}ms as interrupted`)
+      await within(Promise.allSettled(unfinished.map(interrupted)), INTERRUPTED_WAIT_MS)
+    })())
+
+  return { stop }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const backend = await startLocalBackend()
   const shutdown = () => {
     log('stopping')
-    backend.stop()
-    process.exit(0)
+    void backend.stop().finally(() => process.exit(0))
   }
-  process.on('SIGINT', shutdown)
-  process.on('SIGTERM', shutdown)
+  // Once each: a second Ctrl-C stops at once
+  process.once('SIGINT', shutdown)
+  process.once('SIGTERM', shutdown)
 }

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { earliestFirst, listParam, namesAnyone, statusBefore } from './localBackendPolicy.js'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { earliestFirst, firebaseConfigFor, listParam, namesAnyone, statusBefore, underWay, userOrNone } from './localBackendPolicy.js'
 import { MISSED_ACCEPT_MS } from './notifyPolicy.js'
 
 describe('statusBefore', () => {
@@ -110,5 +110,92 @@ describe('earliestFirst', () => {
     inTurn('a', 3, step('a3'))
     await ran(3)
     expect(steps).toEqual(['start a1', 'end a1', 'start a2', 'end a2', 'start a3', 'end a3'])
+  })
+})
+
+describe('userOrNone', () => {
+  const failure = (code?: string) => Object.assign(new Error('lookup failed'), code === undefined ? {} : { code })
+
+  it('is the account Auth found', async () => {
+    await expect(userOrNone(Promise.resolve({ uid: 'u1' }))).resolves.toEqual({ uid: 'u1' })
+  })
+
+  it('is none for an account Auth has no record of, so the caller is asked to sign in', async () => {
+    await expect(userOrNone(Promise.reject(failure('auth/user-not-found')))).resolves.toBeNull()
+  })
+
+  it('passes on any other failure, so a signed-in caller isn’t told to sign in when Auth can’t answer', async () => {
+    for (const error of [failure('auth/internal-error'), failure('app/network-error'), failure('app/invalid-credential'), failure()]) {
+      await expect(userOrNone(Promise.reject(error))).rejects.toBe(error)
+    }
+  })
+})
+
+describe('firebaseConfigFor', () => {
+  const project = 'demo-project'
+  // What firebase emulators:exec hands every script it runs
+  const fromEmulatorsExec = JSON.stringify({ projectId: project, storageBucket: `${project}.appspot.com`, databaseURL: `https://${project}.firebaseio.com` })
+  const emulators = { FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080', FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099' }
+
+  it('names just the project when none is given, with no Storage bucket, as on the NUC', () => {
+    expect(JSON.parse(firebaseConfigFor(project, {}))).toEqual({ projectId: project })
+    expect(JSON.parse(firebaseConfigFor(project, emulators))).toEqual({ projectId: project })
+  })
+
+  it('drops the bucket emulators:exec names when no Storage emulator runs, so nothing reaches the real Cloud Storage', () => {
+    expect(JSON.parse(firebaseConfigFor(project, { ...emulators, FIREBASE_CONFIG: fromEmulatorsExec }))).toEqual({ projectId: project })
+  })
+
+  it('keeps a config beside the Storage emulator, and one set for the real project', () => {
+    expect(firebaseConfigFor(project, { ...emulators, FIREBASE_STORAGE_EMULATOR_HOST: '127.0.0.1:9199', FIREBASE_CONFIG: fromEmulatorsExec })).toBe(fromEmulatorsExec)
+    expect(firebaseConfigFor(project, { FIREBASE_CONFIG: fromEmulatorsExec })).toBe(fromEmulatorsExec)
+  })
+})
+
+describe('underWay', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const after = (ms: number, fail = false) => new Promise<void>((resolve, reject) => setTimeout(() => (fail ? reject(new Error('failed')) : resolve()), ms))
+  // What settle leaves once it resolves; undefined while it waits
+  const settled = (work: ReturnType<typeof underWay<string>>, ms: number) => {
+    const seen: { left?: string[] } = {}
+    void work.settle(ms).then((left) => (seen.left = left))
+    return seen
+  }
+
+  it('waits for work under way to end, failed or not', async () => {
+    const work = underWay<string>()
+    work.add('a', after(1_000))
+    work.add('b', after(2_000, true))
+    const seen = settled(work, 60_000)
+    await vi.advanceTimersByTimeAsync(1_999)
+    expect(seen.left).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(seen.left).toEqual([])
+  })
+
+  it('stops waiting after a while, and names what is still going', async () => {
+    const work = underWay<string>()
+    work.add('quick', after(1_000))
+    work.add('slow', after(120_000))
+    const seen = settled(work, 60_000)
+    await vi.advanceTimersByTimeAsync(59_999)
+    expect(seen.left).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(seen.left).toEqual(['slow'])
+  })
+
+  it('has nothing to wait for once its work has ended', async () => {
+    const work = underWay<string>()
+    work.add('a', after(10))
+    await vi.advanceTimersByTimeAsync(10)
+    const seen = settled(work, 60_000)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(seen.left).toEqual([])
   })
 })

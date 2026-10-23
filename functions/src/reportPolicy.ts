@@ -37,19 +37,26 @@ export interface Round {
   priority: number
 }
 
+// The reports on the item since a moderator last decided, if any
+const openRound = (queued: Queued | undefined) => (queued?.state === 'resolved' ? undefined : queued?.reports)
+
 // The reports a queue item holds once this one counts, or null when it changes nothing.
 // A moderator's decision closes a round. A report filed before it was decided with it (the
 // local backend replays reports on restart, and the trigger retries), so it never reopens the
 // item. The first report after it starts a new round, and someone who reported it before can
 // bring it back to the queue (whether they can hide it again is up to holds).
+// Each person counts once in a round, but a reason they add later is kept, so a later 'someone
+// may be in danger' still puts it first. The same reason again is a replay, and changes nothing.
 export const nextRound = (queued: Queued | undefined, report: Filed): Round | null => {
   if (decidedWith(report.createdAt, queued?.resolvedAt)) return null
-  const current = queued?.state === 'resolved' ? undefined : queued?.reports
+  const current = openRound(queued)
   const reporters = current?.reporterUids ?? []
-  if (reporters.includes(report.reporterUid)) return null
-  const reasons = [...new Set([...(current?.reasons ?? []), report.reason])]
+  const given = current?.reasons ?? []
+  const counted = reporters.includes(report.reporterUid)
+  if (counted && given.includes(report.reason)) return null
+  const reasons = [...new Set([...given, report.reason])]
   return {
-    reporterUids: [...reporters, report.reporterUid],
+    reporterUids: counted ? reporters : [...reporters, report.reporterUid],
     reasons,
     // What the queue shows the crisis mark for: this round's reasons or automod's flag. A
     // self-harm report from a round a moderator has dealt with no longer puts it first.
@@ -64,6 +71,8 @@ export const nextRound = (queued: Queued | undefined, report: Filed): Round | nu
 // That is a read of every report on it, so it's only asked for when it could change the answer.
 export const holds = async (round: Round, queued: Queued | undefined, filed: () => Promise<Pick<Filed, 'reporterUid' | 'createdAt'>[]>) => {
   if (round.reporterUids.length < AUTO_HOLD_REPORTERS) return false
+  // Only someone joining the round can tip it: a reason added by someone in it is still one person
+  if (round.reporterUids.length === (openRound(queued)?.reporterUids?.length ?? 0)) return false
   const decidedAt = queued?.resolvedAt
   if (!isInstant(decidedAt)) return true
   const reportedBefore = new Set((await filed()).filter((f) => decidedWith(f.createdAt, decidedAt)).map((f) => f.reporterUid))

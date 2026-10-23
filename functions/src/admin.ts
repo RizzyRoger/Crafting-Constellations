@@ -1,11 +1,12 @@
 import { FieldValue, type DocumentData, type QueryDocumentSnapshot, type Transaction } from 'firebase-admin/firestore'
 import { defineList } from 'firebase-functions/params'
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https'
-import { approvalOf, leftAsIs, moderatorNote, outcomeOf, removalOf, type Outcome, type Removal } from './adminPolicy.js'
+import { approvalOf, crisisOnPublish, leftAsIs, moderatorNote, outcomeOf, removalOf, type Outcome, type Removal } from './adminPolicy.js'
 import { auth, db, logAction, NOT_FOUND, snapshotOf } from './app.js'
 import { checkPenName, suggestPenName } from './moderation/index.js'
 import { applyNotices, planNotices } from './notify.js'
 import { callable } from './options.js'
+import { reportedName, resetNames } from './profilePolicy.js'
 
 const ADMIN_EMAILS = defineList('ADMIN_EMAILS', { default: [] })
 
@@ -36,18 +37,27 @@ const notice = (type: string, extra: Record<string, unknown> = {}) => ({ type, .
 
 const notify = (uid: string, type: string, extra: Record<string, unknown> = {}) => db.collection(`users/${uid}/notices`).add(notice(type, extra))
 
-// Reset a reported profile to a quiet generated name and clear the note. The old
-// name is retired, not freed, so nobody can take it again, the person included.
-// The retired record is the name alone: account deletion leaves it, and nothing
-// in it points back at them. Gives the new name, or null when the account is gone.
-const resetProfile = async (tx: Transaction, uid: string, now: FieldValue) => {
+// Reset a reported profile to a quiet generated name and clear the note. The name
+// it was reported under is retired, not freed, so nobody can take it again, the
+// person included, even if they've renamed since (see resetNames). The retired
+// record is the name alone: account deletion leaves it, and nothing in it points
+// back at them. Gives the new name, or null when the account is gone.
+const resetProfile = async (tx: Transaction, queued: DocumentData, now: FieldValue) => {
+  const uid: string = queued.authorUid
   const profile = (await tx.get(db.doc(`users/${uid}`))).data()
   if (!profile) return null
+  const current = typeof profile.penNameLower === 'string' && profile.penNameLower ? profile.penNameLower : undefined
+  const reported = reportedName(queued.authorPenName, current)
+  // Every read before the first write: who holds each name now, then a free one to give them
+  const keys = [...new Set([reported, current])].filter((key): key is string => key !== undefined)
+  const records = new Map(await Promise.all(keys.map(async (key) => [key, (await tx.get(db.doc(`penNames/${key}`))).data()] as const)))
   let name = suggestPenName()
-  for (let i = 0; i < 8 && (await tx.get(db.doc(`penNames/${name.toLowerCase()}`))).exists; i++) {
+  for (let i = 0; i < 8 && (records.has(name.toLowerCase()) || (await tx.get(db.doc(`penNames/${name.toLowerCase()}`))).exists); i++) {
     name = `${suggestPenName()} ${Math.floor(Math.random() * 90 + 10)}`
   }
-  if (profile.penNameLower) tx.set(db.doc(`penNames/${profile.penNameLower}`), { retired: true })
+  const { retire, free } = resetNames(uid, reported, current, records)
+  if (retire) tx.set(db.doc(`penNames/${retire}`), { retired: true })
+  if (free) tx.delete(db.doc(`penNames/${free}`))
   tx.set(db.doc(`penNames/${name.toLowerCase()}`), { uid })
   tx.update(db.doc(`users/${uid}`), { penName: name, penNameLower: name.toLowerCase(), note: '', updatedAt: now })
   return name
@@ -57,23 +67,28 @@ const ignoreMissing = (error: { code?: number }) => {
   if (error.code !== NOT_FOUND) throw error
 }
 
-// Writing keeps the name it went out with, but a reset is there to take the name
-// out of view: put the new one on everything they wrote (held writing too, so
-// approving it later can't bring the old one back) and on the notices they caused
-const renameWriting = async (uid: string, penName: string) => {
+// Writing keeps the name and mark it went out with, but a reset is there to take the
+// name out of view, and a revoke the mark: put what they show now on everything they
+// wrote (held writing too, so approving it later can't bring the old back) and on the
+// notices they caused
+const refreshWriting = async (uid: string, shown: { penName?: string; pro?: boolean }) => {
   const [writing, notices] = await Promise.all([
     Promise.all(['posts', 'comments', 'messages'].map((group) => db.collectionGroup(group).where('authorUid', '==', uid).get())),
     db.collectionGroup('notices').where('actorUid', '==', uid).get(),
   ])
-  // Writing still pending has no name on it yet, and takes the new one as it goes out
-  const stale = (snapshot: string) => (d: QueryDocumentSnapshot) => {
-    const shown = d.get(`${snapshot}.penName`)
-    return typeof shown === 'string' && shown !== penName
-  }
   const writer = db.bulkWriter()
+  // Only what it shows differently. Writing still pending has nothing on it yet, and
+  // takes what they show now as it goes out
+  const refresh = (snapshot: 'author' | 'actor') => (d: QueryDocumentSnapshot) => {
+    const stale = Object.entries(shown).filter(([field, value]) => {
+      const was = d.get(`${snapshot}.${field}`)
+      return was !== undefined && was !== value
+    })
+    return stale.length === 0 ? [] : [writer.update(d.ref, Object.fromEntries(stale.map(([field, value]) => [`${snapshot}.${field}`, value])))]
+  }
   const results = [
-    ...writing.flatMap((s) => s.docs).filter(stale('author')).map((d) => writer.update(d.ref, { 'author.penName': penName })),
-    ...notices.docs.filter(stale('actor')).map((d) => writer.update(d.ref, { 'actor.penName': penName })),
+    ...writing.flatMap((s) => s.docs).flatMap(refresh('author')),
+    ...notices.docs.flatMap(refresh('actor')),
   ].map((result) => result.catch(ignoreMissing)) // deleted meanwhile, with someone else's account
   await writer.close()
   await Promise.all(results)
@@ -89,7 +104,8 @@ const approveHeld = async (tx: Transaction, queued: DocumentData, now: FieldValu
   const content = (await tx.get(contentRef)).data()
   if (!content || !['held', 'pending'].includes(content.status)) return leftAsIs(content?.status)
   // Every read goes before the first write: whether it can still reach its readers, then who it pings
-  const [connection, chat] = await Promise.all([
+  const [ban, connection, chat] = await Promise.all([
+    tx.get(db.doc(`bans/${content.authorUid}`)),
     queued.kind === 'dm' ? tx.get(db.doc(`connections/${queued.pairId}`)) : undefined,
     queued.kind === 'chatMessage' ? tx.get(db.doc(`chats/${queued.chatId}`)) : undefined,
   ])
@@ -97,10 +113,14 @@ const approveHeld = async (tx: Transaction, queued: DocumentData, now: FieldValu
     kind: queued.kind,
     authorUid: content.authorUid,
     publishedAt: content.publishedAt,
+    authorBanned: ban.exists,
+    undelivered: content.undelivered,
     connectionStatus: connection?.data()?.status,
     chatUids: chat?.data()?.uids,
   })
   if (approval === 'restore') tx.update(contentRef, { status: 'published' })
+  // It stays held, and its writer sees it won't arrive, not that it still waits for a person
+  if (approval === 'undeliverable' || approval === 'paused') tx.update(contentRef, { undelivered: true })
   if (approval !== 'publish') return outcomeOf(approval)
 
   // Writing held before it went out pings nobody until now
@@ -108,6 +128,7 @@ const approveHeld = async (tx: Transaction, queued: DocumentData, now: FieldValu
   tx.update(contentRef, {
     status: 'published',
     publishedAt: now,
+    ...(crisisOnPublish({ kind: queued.kind, heldReason: content.heldReason, automodCrisis: queued.automod?.crisis }) ? { crisis: true } : {}),
     ...(notices.mentioned.length > 0 ? { mentioned: notices.mentioned } : {}),
   })
   applyNotices(tx, notices)
@@ -131,8 +152,8 @@ export const approveContent = onCall<{ queueId: string }>(callable(), async (req
     if (queued.state !== 'open') return 'already-resolved'
     const now = FieldValue.serverTimestamp()
     const outcome = queued.kind === 'profile' ? 'kept' : await approveHeld(tx, queued, now)
-    // A note that can no longer reach its readers stays held, and still leaves the queue
-    const resolution = outcome === 'undelivered' ? 'approved-undelivered' : 'approved'
+    // Writing that can no longer reach its readers stays held, and still leaves the queue
+    const resolution = outcome === 'undelivered' || outcome === 'paused' ? 'approved-undelivered' : 'approved'
     tx.update(queueRef, { state: 'resolved', resolution, resolvedBy: actor, resolvedAt: now, updatedAt: now })
     return outcome
   })
@@ -145,7 +166,7 @@ export const approveContent = onCall<{ queueId: string }>(callable(), async (req
 // also gives the new name, for the writing the person already has out.
 const takeDown = async (tx: Transaction, queued: DocumentData, actor: string, now: FieldValue): Promise<{ removal: Removal; penName?: string }> => {
   if (queued.kind === 'profile') {
-    const penName = await resetProfile(tx, queued.authorUid, now)
+    const penName = await resetProfile(tx, queued, now)
     return penName ? { removal: 'remove', penName } : { removal: 'gone' }
   }
   const contentRef = db.doc(queued.contentPath)
@@ -177,7 +198,7 @@ export const removeContent = onCall<{ queueId: string; note?: string }>(callable
   if (!done) return { ok: true, outcome: 'already-resolved' }
   await logAction(actor, 'removeContent', request.data.queueId, { note, removal: done.removal })
   // Once the reset is in: writing that goes out from then on takes the new name itself
-  if (done.penName) await renameWriting(done.authorUid, done.penName)
+  if (done.penName) await refreshWriting(done.authorUid, { penName: done.penName })
   return { ok: true, outcome: outcomeOf(done.removal) }
 })
 
@@ -254,6 +275,9 @@ export const reviewProfessional = onCall<{ uid: string; decision: 'approve' | 'd
     if (decision !== 'revoke') await notify(uid, pro ? 'proApproved' : 'proDenied', { note })
 
     await logAction(actor, 'reviewProfessional', uid, { decision })
+    // Writing from now on takes the mark from the profile. Taking it away takes it off what
+    // they already wrote too; an approval marks only what they write next
+    if (!pro) await refreshWriting(uid, { pro: false })
     return { ok: true }
   },
 )

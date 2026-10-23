@@ -27,10 +27,12 @@ const reviewProfessional = httpsCallable<{ uid: string; decision: 'approve' | 'd
   functions,
   'reviewProfessional',
 )
+const approveContent = httpsCallable<{ queueId: string }, { ok: true; outcome: string }>(functions, 'approveContent')
 
 const exists = async (path: string) => (await db.doc(path).get()).exists
 const field = async (path: string, name: string) => (await db.doc(path).get()).get(name)
 const claims = async (uid: string) => (await adminAuth.getUser(uid)).customClaims ?? {}
+const queueId = (path: string) => path.replaceAll('/', '~')
 
 const codeOf = async (attempt: Promise<unknown>) => {
   const error = await attempt.then(
@@ -120,5 +122,69 @@ describe('reviewProfessional', () => {
     expect(await codeOf(reviewProfessional({ uid: someone, decision: 'revoke' }))).toBe('functions/not-found')
     expect(await exists(`users/${someone}`)).toBe(false)
     expect(await claims(someone)).not.toHaveProperty('pro')
+  })
+})
+
+describe('Revoke mark', () => {
+  // The name and mark the triggers put on writing as it goes out, and on the notices it causes
+  const signed = (uid: string, pro: boolean) => ({ penName: uid, avatarSeed: uid, pigment: 'graphite', pro })
+  const written = (authorUid: string, pro: boolean, extra: Record<string, unknown>) => ({
+    authorUid,
+    status: 'published',
+    createdAt: new Date(),
+    author: signed(authorUid, pro),
+    ...extra,
+  })
+
+  // A marked pro's writing everywhere it goes, one reply of theirs held for review, a notice they
+  // caused; and another pro's post and notice beside them
+  const marked = async () => {
+    const n = await asModerator()
+    const pro = `marked-pro-${n}`
+    const reader = `marked-reader-${n}`
+    const other = `other-pro-${n}`
+    await person(pro, { claims: { pro: true }, profile: { pro: true } })
+    await person(reader)
+    await person(other, { claims: { pro: true }, profile: { pro: true } })
+
+    const g = `groups/revoke-${n}`
+    const chat = `chats/revoke-${n}`
+    await db.doc(g).set({ name: 'Evening sheet', memberCount: 0 })
+    await Promise.all([pro, reader, other].map((uid) => db.doc(`${g}/members/${uid}`).set({ uid, joinedAt: new Date() })))
+    await db.doc(chat).set({ name: 'Soup rota', uids: [pro, reader], createdBy: pro, createdAt: new Date(), lastMessageAt: new Date() })
+
+    await db.doc(`${g}/posts/rp`).set(written(reader, false, { body: 'Long week.', likeCount: 0, commentCount: 0 }))
+    const theirs = [`${g}/posts/pp`, `${g}/posts/rp/comments/pc`, `${g}/messages/pm`, `${chat}/messages/pm`]
+    await Promise.all(theirs.map((path) => db.doc(path).set(written(pro, true, { text: 'Rest when you can.' }))))
+    const held = `${g}/posts/rp/comments/held`
+    await db.doc(held).set({ ...written(pro, true, { text: 'Try the night line.' }), status: 'held', heldReason: 'review' })
+    await db.doc(`modQueue/${queueId(held)}`).set({ contentPath: held, kind: 'comment', groupId: `revoke-${n}`, authorUid: pro, state: 'open' })
+    await db.doc(`users/${reader}/notices/from-pro`).set({ type: 'mention', contentPath: `${g}/messages/pm`, actorUid: pro, actor: signed(pro, true), seen: false, createdAt: new Date() })
+
+    await db.doc(`${g}/posts/op`).set(written(other, true, { body: 'Ask me anything.' }))
+    await db.doc(`users/${reader}/notices/from-other`).set({ type: 'comment', contentPath: `${g}/posts/rp/comments/oc`, actorUid: other, actor: signed(other, true), seen: false, createdAt: new Date() })
+    return { pro, reader, other, g, theirs, held }
+  }
+
+  it('takes the mark off everything they wrote and every notice they caused', async () => {
+    const w = await marked()
+    await expect(reviewProfessional({ uid: w.pro, decision: 'revoke' })).resolves.toMatchObject({ data: { ok: true } })
+
+    for (const path of [...w.theirs, w.held]) expect(await field(path, 'author'), path).toEqual(signed(w.pro, false))
+    expect(await field(`users/${w.reader}/notices/from-pro`, 'actor')).toEqual(signed(w.pro, false))
+    // Nobody else's mark moves
+    expect(await field(`${w.g}/posts/op`, 'author.pro')).toBe(true)
+    expect(await field(`users/${w.reader}/notices/from-other`, 'actor.pro')).toBe(true)
+  })
+
+  it('lets writing held before the revoke go out without the mark, and its notices too', async () => {
+    const w = await marked()
+    await expect(reviewProfessional({ uid: w.pro, decision: 'revoke' })).resolves.toMatchObject({ data: { ok: true } })
+
+    await expect(approveContent({ queueId: queueId(w.held) })).resolves.toMatchObject({ data: { ok: true, outcome: 'published' } })
+    expect(await field(w.held, 'status')).toBe('published')
+    expect(await field(w.held, 'author.pro')).toBe(false)
+    // The reply pings the post's writer, under the name and mark they show now
+    expect(await field(`users/${w.reader}/notices/comment~${queueId(w.held)}`, 'actor')).toEqual(signed(w.pro, false))
   })
 })

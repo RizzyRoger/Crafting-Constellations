@@ -10,6 +10,7 @@ import { applyNotices, NO_NOTICES, planNotices } from './notify.js'
 // - crisis in a DM / chat → published with `crisis: true` (everyone in it sees resources), queued at priority 2
 // - crisis elsewhere      → held for a person to read; the author sees resources
 // - anything else flagged → held, queued for review
+// - DM, no longer connected → held, marked `undelivered` for its writer (and queued if flagged)
 // - author banned or gone → removed (gone: deleted their account while this was in flight)
 // Whatever is delivered pings the people picked with @ and, for a comment, the post's writer.
 export const handleNewContent = async (ref: DocumentReference) => {
@@ -22,11 +23,15 @@ export const handleNewContent = async (ref: DocumentReference) => {
     if (!data || data.status !== 'pending') return
 
     const authorUid: string = data.authorUid
+    const segments = ref.path.split('/')
+    const pairId = kind === 'dm' ? segments[1] : undefined
+    const chatId = kind === 'chatMessage' ? segments[1] : undefined
     const rateRef = db.doc(`rateLimits/${authorUid}`)
-    const [userSnap, banSnap, rateSnap] = await Promise.all([
+    const [userSnap, banSnap, rateSnap, connection] = await Promise.all([
       tx.get(db.doc(`users/${authorUid}`)),
       tx.get(db.doc(`bans/${authorUid}`)),
       tx.get(rateRef),
+      pairId ? tx.get(db.doc(`connections/${pairId}`)) : undefined,
     ])
     const now = FieldValue.serverTimestamp()
     // Paced by when it was written (createdAt is the server's time, held by the rules), so a
@@ -49,10 +54,11 @@ export const handleNewContent = async (ref: DocumentReference) => {
     const categories = floodHold ? [...verdict.categories, 'spam'] : verdict.categories
     const matches = floodHold ? [...verdict.matches, { category: 'spam' as const, term: 'too many notes' }] : verdict.matches
     const crisisOnly = verdict.crisis && verdict.categories.every((c) => c === 'selfHarm')
-    const deliver = action === 'publish' || (privateThread && crisisOnly)
-    const segments = ref.path.split('/')
-    const pairId = kind === 'dm' ? segments[1] : undefined
-    const chatId = kind === 'chatMessage' ? segments[1] : undefined
+    // A note was written while the two were connected, but may have waited since (the backend
+    // off, a retry): as with Approve, it goes out only while they still are. A chat line still
+    // goes out after its writer leaves: leaving is theirs, and a goodbye sent just before should land
+    const reachable = !pairId || connection?.data()?.status === 'accepted'
+    const deliver = reachable && (action === 'publish' || (privateThread && crisisOnly))
 
     // Its reads go before any write (a transaction rule), so the stamps are set after
     const notices = deliver ? await planNotices(tx, ref.path, data, author) : NO_NOTICES
@@ -72,7 +78,14 @@ export const handleNewContent = async (ref: DocumentReference) => {
       }
       if (chatId) tx.update(db.doc(`chats/${chatId}`), { lastMessageAt: now, lastAuthorUid: authorUid })
     } else {
-      tx.update(ref, { status: 'held', heldReason: verdict.crisis ? 'crisis' : 'review', author })
+      tx.update(ref, {
+        status: 'held',
+        // Why a person will read it; clean writing that only can't reach them has none
+        ...(action === 'hold' ? { heldReason: verdict.crisis ? 'crisis' : 'review' } : {}),
+        // Its writer sees it won't arrive
+        ...(reachable ? {} : { undelivered: true }),
+        author,
+      })
     }
 
     if (action === 'hold') {

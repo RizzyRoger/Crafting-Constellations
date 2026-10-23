@@ -14,14 +14,16 @@ interface Played {
 }
 
 // Each report in turn as handleReport files it (merged into the queue item), with a moderator
-// keeping the writing up at each 'keep'. Every report stays in the reports collection, counted
-// or not. Gives the item, the reports, what the last report did and the reads it all took.
+// keeping the writing up at each 'keep', and 'a:selfHarm' giving a reason of its own. Every report
+// stays in the reports collection, counted or not. Gives the item, the reports, what the last
+// report did and the reads it all took.
 const play = (steps: string[]) =>
   steps.reduce<Promise<Played>>(
     async (previous, step, i) => {
       const last = await previous
       if (step === 'keep') return { ...last, queued: { ...last.queued, state: 'resolved', resolvedAt: at(i) }, round: undefined, hold: false }
-      const report = filed(step, at(i))
+      const [who, reason] = step.split(':')
+      const report = filed(who, at(i), reason)
       const sent = [...last.sent, report]
       const round = nextRound(last.queued, report)
       if (!round) return { ...last, sent, round, hold: false }
@@ -47,7 +49,16 @@ describe('nextRound', () => {
   })
 
   it('counts the same person once in a round, so a replayed report changes nothing', () => {
-    expect(nextRound({ state: 'open', reports: { reporterUids: ['a'], reasons: ['spam'] } }, filed('a'))).toBeNull()
+    expect(nextRound({ state: 'open', reports: { reporterUids: ['a'], reasons: ['spam'] } }, filed('a', at(100), 'spam'))).toBeNull()
+    // Someone else gave the reason first
+    expect(nextRound({ state: 'open', reports: { reporterUids: ['a', 'b'], reasons: ['spam', 'harassment'] } }, filed('a'))).toBeNull()
+  })
+
+  it('keeps a reason someone in the round adds later, without counting them twice', () => {
+    const open: Queued = { state: 'open', reports: { reporterUids: ['a'], reasons: ['harassment'] } }
+    expect(nextRound(open, filed('a', at(100), 'selfHarm'))).toEqual({ reporterUids: ['a'], reasons: ['harassment', 'selfHarm'], priority: 2 })
+    // That report replayed, once the item has it
+    expect(nextRound({ state: 'open', reports: { reporterUids: ['a'], reasons: ['harassment', 'selfHarm'] } }, filed('a', at(100), 'selfHarm'))).toBeNull()
   })
 
   it('starts a new round after a moderator decides', () => {
@@ -140,6 +151,14 @@ describe('holds', () => {
     expect(read).not.toHaveBeenCalled()
     expect(await holds(round(['a', 'b', 'c']), { state: 'open', resolvedAt: at(200) }, read)).toBe(false)
     expect(read).toHaveBeenCalledTimes(1)
+  })
+
+  it('never hides the writing for a reason someone in the round adds later, nor reads for it', async () => {
+    const added = await play(['a', 'b', 'a:selfHarm'])
+    expect(added).toMatchObject({ round: { reporterUids: ['a', 'b'], reasons: ['harassment', 'selfHarm'], priority: 2 }, hold: false })
+    // Three in the round after a decision, all of whom reported it before: one read, for c joining
+    const again = await play(['a', 'b', 'c', 'keep', 'a', 'b', 'c', 'c:selfHarm'])
+    expect(again).toMatchObject({ round: { reporterUids: ['a', 'b', 'c'], priority: 2 }, hold: false, reads: 1 })
   })
 
   it('takes no reads for one person reporting over and over, and one for each new person once three could hide it', async () => {

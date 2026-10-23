@@ -5,27 +5,43 @@
 // - publish:       it never went out (automod held it first), so it goes out now and pings people
 // - restore:       it went out once and reports hid it, so it comes back quietly: its notices
 //                  and its place in the conversation were given the first time
-// - undeliverable: a private note whose two people are no longer connected, or a chat note
-//                  whose writer has left the chat; it stays held, so it never reaches them
-export type Approval = 'publish' | 'restore' | 'undeliverable'
+// - undeliverable: a private note whose two people are no longer connected (or weren't when it
+//                  arrived), or a chat note whose writer has left the chat; it stays held, so it
+//                  never reaches them, even once they connect again
+// - paused:        its writer is banned, so it stays held, as anything new from them is removed.
+//                  Writing that went out before is restored all the same: a ban leaves that up
+// Either way it is marked `undelivered`, so its writer sees it won't arrive
+export type Approval = 'publish' | 'restore' | 'undeliverable' | 'paused'
 
 export interface Held {
   kind: string
   authorUid: string
   // Set when it was first published: report holds keep it, automod holds never had it
   publishedAt?: unknown
+  // bans/{authorUid} exists
+  authorBanned?: boolean
+  // Its `undelivered` mark: it was found unable to reach them as it arrived, and its writer told
+  undelivered?: unknown
   // connections/{pairId}.status for a private note; undefined once they disconnected
   connectionStatus?: unknown
   // chats/{chatId}.uids for a chat note; undefined if the chat is gone
   chatUids?: unknown
 }
 
-export const approvalOf = ({ kind, authorUid, publishedAt, connectionStatus, chatUids }: Held): Approval => {
+export const approvalOf = ({ kind, authorUid, publishedAt, authorBanned, undelivered, connectionStatus, chatUids }: Held): Approval => {
   if (publishedAt) return 'restore'
+  if (authorBanned) return 'paused'
+  if (undelivered === true) return 'undeliverable'
   if (kind === 'dm' && connectionStatus !== 'accepted') return 'undeliverable'
   if (kind === 'chatMessage' && !(Array.isArray(chatUids) && chatUids.includes(authorUid))) return 'undeliverable'
   return 'publish'
 }
+
+// Crisis language in a private note or chat goes out with resources for everyone in it, as
+// automod delivers it, even when something else in it held it for a person first. Group
+// writing never carries the mark: its crisis holds are for the writer alone
+export const crisisOnPublish = ({ kind, heldReason, automodCrisis }: { kind: string; heldReason?: unknown; automodCrisis?: unknown }) =>
+  (kind === 'dm' || kind === 'chatMessage') && (heldReason === 'crisis' || automodCrisis === true)
 
 // What Remove does to queued writing, by its status now:
 // - remove:    up, held or waiting, so it comes down and its writer is told
@@ -39,18 +55,19 @@ export const removalOf = (status: unknown): Removal => (status === 'withdrawn' ?
 
 // What came of an Approve or Remove, as the moderator's page is told. The entry leaves the
 // queue whatever came of it, so this is the only way they know the button didn't do what it says:
-// - published, restored, undelivered: Approve's publish, restore and undeliverable
+// - published, restored, undelivered, paused: Approve's publish, restore, undeliverable and paused
 // - kept:             already up (or a profile), so Approve leaves it as it is
 // - removed:          taken down, or the profile reset, and its writer told
 // - withdrawn:        its writer had already taken it down, so nothing changed
 // - gone:             already removed, or deleted with the writer's account, so nothing changed
 // - already-resolved: another moderator (or an earlier press) decided it first, so nothing changed
-export type Outcome = 'published' | 'restored' | 'undelivered' | 'kept' | 'removed' | 'withdrawn' | 'gone' | 'already-resolved'
+export type Outcome = 'published' | 'restored' | 'undelivered' | 'paused' | 'kept' | 'removed' | 'withdrawn' | 'gone' | 'already-resolved'
 
 const OUTCOMES: Record<Approval | Removal, Outcome> = {
   publish: 'published',
   restore: 'restored',
   undeliverable: 'undelivered',
+  paused: 'paused',
   remove: 'removed',
   withdrawn: 'withdrawn',
   gone: 'gone',

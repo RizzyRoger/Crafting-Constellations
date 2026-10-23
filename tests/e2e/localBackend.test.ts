@@ -84,6 +84,13 @@ const signInAs = async (uid: string) => {
   await signInWithEmailAndPassword(auth, `${uid}@example.test`, PASSWORD)
 }
 
+// Signs in as a new moderator, who makes the calls that follow
+const moderator = async () => {
+  const uid = await person('Night Owl')
+  await adminAuth.setCustomUserClaims(uid, { admin: true })
+  return uid
+}
+
 const notices = async (uid: string) =>
   (await adminDb.collection(`users/${uid}/notices`).get()).docs.map((d): { id: string; [field: string]: unknown } => ({ id: d.id, ...d.data() }))
 
@@ -95,6 +102,8 @@ const group = async (uids: string[]) => {
 }
 
 const published = (path: string) => eventually(async () => (await field(path, 'status')) === 'published', `${path} to publish`)
+const held = (path: string) => eventually(async () => (await field(path, 'status')) === 'held', `${path} to be held`)
+const queueId = (path: string) => path.replaceAll('/', '~')
 
 // Group talk written while the backend was off, one note every three minutes
 const BACKLOG = Array.from({ length: 12 }, (_, i) => `groups/backlog/messages/m${i + 1}`)
@@ -424,18 +433,78 @@ describe('friendships', () => {
   })
 })
 
+// Written while they could, judged later: the backend was off, or a trigger retried. Written
+// here with the block (or the disconnect, or the leaving) already done, so the timing is fixed
+describe('private notes that waited', () => {
+  const connect = (writer: string, reader: string) => {
+    const pairId = [writer, reader].sort().join('_')
+    return adminDb.doc(`connections/${pairId}`).set({ uids: pairId.split('_'), requester: writer, recipient: reader, status: 'accepted', createdAt: new Date(), updatedAt: new Date() })
+  }
+  const write = (path: string, authorUid: string, text: string) => adminDb.doc(path).set({ authorUid, text, status: 'pending', createdAt: new Date() })
+  const queueEntry = async (path: string) => (await adminDb.doc(`modQueue/${queueId(path)}`).get()).data()
+
+  it('delivers a note while the two are connected, and holds one that waited past a block, telling only its writer', async () => {
+    const writer = await person('Juniper')
+    const reader = await person('Larch')
+    const pairId = [writer, reader].sort().join('_')
+    await connect(writer, reader)
+    const [first, second] = [`dms/${pairId}/messages/m1`, `dms/${pairId}/messages/m2`]
+    await write(first, writer, 'Thinking of you tonight.')
+    await published(first)
+    const thread = (await adminDb.doc(`dms/${pairId}`).get()).data()
+    expect(thread).toMatchObject({ lastAuthorUid: writer })
+
+    await adminDb.doc(`connections/${pairId}`).update({ status: 'blocked', blockedBy: reader, updatedAt: new Date() })
+    await write(second, writer, 'Thinking of you tonight.')
+    await held(second)
+
+    expect((await adminDb.doc(second).get()).data()).toMatchObject({ undelivered: true, author: { penName: 'Juniper' } })
+    // Nothing in it for a person to read
+    expect(await field(second, 'heldReason')).toBeUndefined()
+    expect(await queueEntry(second)).toBeUndefined()
+    expect((await adminDb.doc(`dms/${pairId}`).get()).data()).toEqual(thread)
+  })
+
+  it('holds notes that waited past a disconnect, still giving crisis words to a person and their writer resources', async () => {
+    const writer = await person('Medick')
+    const reader = await person('Lovage')
+    const pairId = [writer, reader].sort().join('_')
+    const [plain, heavy] = [`dms/${pairId}/messages/m1`, `dms/${pairId}/messages/m2`]
+    await write(plain, writer, 'Thinking of you tonight.')
+    await write(heavy, writer, 'I want to die')
+    await Promise.all([plain, heavy].map(held))
+
+    expect((await adminDb.doc(plain).get()).data()).toMatchObject({ undelivered: true })
+    expect((await adminDb.doc(heavy).get()).data()).toMatchObject({ undelivered: true, heldReason: 'crisis' })
+    expect(await field(heavy, 'crisis')).toBeUndefined()
+    expect(await queueEntry(heavy)).toMatchObject({ state: 'open', delivered: false, priority: 2 })
+    expect(await notices(writer)).toEqual([expect.objectContaining({ type: 'crisis', contentPath: heavy })])
+    expect((await adminDb.doc(`dms/${pairId}`).get()).exists).toBe(false)
+
+    // Its writer was told it won't arrive, so it doesn't once they connect again either
+    await connect(writer, reader)
+    await moderator()
+    expect(await callViaQueue('approveContent', { queueId: queueId(heavy) })).toMatchObject({ state: 'done', result: { ok: true, outcome: 'undelivered' } })
+    expect(await field(heavy, 'status')).toBe('held')
+    expect((await adminDb.doc(`dms/${pairId}`).get()).exists).toBe(false)
+  })
+
+  it('still delivers a chat line whose writer left the chat while it waited', async () => {
+    const writer = await person('Yarrow Bell')
+    const friend = await person('Comfrey')
+    const chat = `chats/chat-${runs}`
+    await adminDb.doc(chat).set({ name: 'Evenings', uids: [friend], createdBy: writer, createdAt: new Date(), lastMessageAt: null })
+    const path = `${chat}/messages/m1`
+    await write(path, writer, 'Take care of yourselves, I am heading out.')
+    await published(path)
+    expect(await field(chat, 'lastAuthorUid')).toBe(writer)
+  })
+})
+
 describe('review queue', () => {
-  const queueId = (path: string) => path.replaceAll('/', '~')
   const report = (path: string, reporterUids: string[]) =>
     Promise.all(reporterUids.map((reporterUid) => adminDb.collection('reports').add({ reporterUid, contentPath: path, reason: 'harassment', createdAt: new Date() })))
-  const held = (path: string) => eventually(async () => (await field(path, 'status')) === 'held', `${path} to be held`)
   const queued = (path: string) => eventually(async () => (await field(`modQueue/${queueId(path)}`, 'state')) === 'open', `${path} to be queued`)
-  // Signs in as a new moderator, who makes the calls that follow
-  const moderator = async () => {
-    const uid = await person('Night Owl')
-    await adminAuth.setCustomUserClaims(uid, { admin: true })
-    return uid
-  }
   const removedNotices = async (uid: string) => (await notices(uid)).filter((notice) => notice.type === 'removed')
 
   it('keeps up writing that reports hid without pinging anyone again, so read notices stay read', async () => {
@@ -499,6 +568,7 @@ describe('review queue', () => {
     await moderator()
     expect(await callViaQueue('approveContent', { queueId: queueId(first) })).toMatchObject({ state: 'done', result: { ok: true, outcome: 'published' } })
     expect(await field(first, 'status')).toBe('published')
+    expect(await field(first, 'undelivered')).toBeUndefined()
     const thread = (await adminDb.doc(`dms/${pairId}`).get()).data()
     expect(thread).toMatchObject({ lastAuthorUid: writer })
 
@@ -509,8 +579,54 @@ describe('review queue', () => {
     expect(await callViaQueue('approveContent', { queueId: queueId(second) })).toMatchObject({ state: 'done', result: { ok: true, outcome: 'undelivered' } })
 
     expect(await field(second, 'status')).toBe('held')
+    // Its writer is told so too, not left thinking a person has yet to read it
+    expect(await field(second, 'undelivered')).toBe(true)
     expect((await adminDb.doc(`dms/${pairId}`).get()).data()).toEqual(thread)
     expect(await field(`modQueue/${queueId(second)}`, 'state')).toBe('resolved')
+    expect(await field(`modQueue/${queueId(second)}`, 'resolution')).toBe('approved-undelivered')
+  })
+
+  it('gives both people crisis resources once a moderator approves a private note held for crisis words and more', async () => {
+    const writer = await person('Sorrel Moon')
+    const reader = await person('Tansy')
+    const pairId = [writer, reader].sort().join('_')
+    await adminDb.doc(`connections/${pairId}`).set({ uids: pairId.split('_'), requester: writer, recipient: reader, status: 'accepted', createdAt: new Date(), updatedAt: new Date() })
+    const chat = `chats/chat-${runs}`
+    await adminDb.doc(chat).set({ name: 'Late shift', uids: [writer, reader], createdBy: writer, createdAt: new Date(), lastMessageAt: null })
+    // The crisis words alone would go straight out marked; the link holds it for a person first
+    const [note, line] = [`dms/${pairId}/messages/m1`, `${chat}/messages/m1`]
+    await Promise.all([note, line].map((path) => adminDb.doc(path).set({ authorUid: writer, text: 'I want to die, see example.com', status: 'pending', createdAt: new Date() })))
+    await Promise.all([note, line].map(held))
+    expect(await Promise.all([note, line].map((path) => field(path, 'heldReason')))).toEqual(['crisis', 'crisis'])
+
+    await moderator()
+    for (const path of [note, line]) {
+      expect(await callViaQueue('approveContent', { queueId: queueId(path) })).toMatchObject({ state: 'done', result: { ok: true, outcome: 'published' } })
+      expect((await adminDb.doc(path).get()).data()).toMatchObject({ status: 'published', crisis: true })
+    }
+  })
+
+  it('keeps a banned writer’s held writing held when a moderator approves it, and pings nobody', async () => {
+    const writer = await person('Hemlock')
+    const reader = await person('Fen')
+    const pairId = [writer, reader].sort().join('_')
+    await adminDb.doc(`connections/${pairId}`).set({ uids: pairId.split('_'), requester: writer, recipient: reader, status: 'accepted', createdAt: new Date(), updatedAt: new Date() })
+    const g = await group([writer, reader])
+    const [note, post] = [`dms/${pairId}/messages/m1`, `${g}/posts/p1`]
+    await adminDb.doc(note).set({ authorUid: writer, text: 'you are such a loser', status: 'pending', createdAt: new Date() })
+    await adminDb.doc(post).set({ authorUid: writer, body: '@Fen you are such a loser', mentions: [reader], status: 'pending', createdAt: new Date() })
+    await Promise.all([note, post].map(held))
+
+    // Banned, with their writing left as it is
+    await moderator()
+    expect(await callViaQueue('banUser', { uid: writer, reason: 'Harassment.' })).toMatchObject({ state: 'done' })
+    for (const path of [note, post]) {
+      expect(await callViaQueue('approveContent', { queueId: queueId(path) })).toMatchObject({ state: 'done', result: { ok: true, outcome: 'paused' } })
+      expect((await adminDb.doc(path).get()).data()).toMatchObject({ status: 'held', undelivered: true })
+      expect(await field(`modQueue/${queueId(path)}`, 'resolution')).toBe('approved-undelivered')
+    }
+    expect(await notices(reader)).toEqual([])
+    expect((await adminDb.doc(`dms/${pairId}`).get()).exists).toBe(false)
   })
 
   it('tells the writer once, with the moderator’s note, however many times Remove is pressed', async () => {

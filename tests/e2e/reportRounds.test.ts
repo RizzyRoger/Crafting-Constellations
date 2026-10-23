@@ -2,7 +2,8 @@
  * Rounds of reports end to end, on the Firestore emulator alone: the built report
  * handler and account purge (functions/lib), called as the trigger and deleteAccount
  * call them, with a moderator's Approve written as approveContent writes it, and a
- * watch on when the handler reads every report on the writing. Run inside
+ * watch on when the handler reads every report on the writing, and what the Review page
+ * then shows of what reporters wrote (src/lib/reportDetails). Run inside
  * the emulators after npm run functions:build:
  *   firebase emulators:exec --only firestore --project demo-crafting-constellations "vitest run --config vitest.e2e.config.ts tests/e2e/reportRounds.test.ts"
  *
@@ -11,6 +12,7 @@
 import { deleteApp, initializeApp } from 'firebase-admin/app'
 import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { reportDetails, type Entry, type Filed } from '../../src/lib/reportDetails'
 
 const admin = initializeApp({ projectId: 'demo-crafting-constellations' }, 'report-rounds-admin')
 const db = getFirestore(admin)
@@ -19,15 +21,22 @@ let handleReport: (report: unknown) => Promise<void>
 let purgeAccount: (uid: string) => Promise<unknown>
 // The handler's own Firestore, to see when it queries the reports
 let handlerDb: { collection: (path: string) => unknown }
+// The purge's own Storage, to see it is left alone
+let handlerStorage: { bucket: (name: string) => unknown }
 
 beforeAll(async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Run inside the Firestore emulator (firebase emulators:exec).')
+  // With no Storage bucket, as on the NUC. emulators:exec names one of its own, and with no
+  // Storage emulator running, the purge would otherwise go to the real Cloud Storage.
+  process.env.FIREBASE_CONFIG = JSON.stringify({ projectId: 'demo-crafting-constellations' })
   // @ts-expect-error built JS from the functions package (npm run functions:build)
   handleReport = (await import('../../functions/lib/reports.js')).handleReport
   // @ts-expect-error built JS from the functions package (npm run functions:build)
   purgeAccount = (await import('../../functions/lib/account.js')).purgeAccount
   // @ts-expect-error built JS from the functions package (npm run functions:build)
-  handlerDb = (await import('../../functions/lib/app.js')).db
+  const app = await import('../../functions/lib/app.js')
+  handlerDb = app.db
+  handlerStorage = app.storage
 })
 
 afterAll(() => deleteApp(admin))
@@ -42,15 +51,21 @@ const setUp = async (names: string[], { profile = false } = {}) => {
   const g = `groups/${fresh('rounds')}`
   const uids = Object.fromEntries(names.map((name) => [name, fresh(name)]))
   await Promise.all(Object.values(uids).map((uid) => db.doc(`${g}/members/${uid}`).set({ uid, joinedAt: new Date() })))
-  const path = profile ? `users/${fresh('writer')}` : `${g}/posts/p1`
-  await db.doc(path).set(profile ? { penName: 'Wren', note: 'A long day.' } : { authorUid: fresh('writer'), body: 'A long day.', status: 'published', createdAt: new Date() })
+  const writer = fresh('writer')
+  const path = profile ? `users/${writer}` : `${g}/posts/p1`
+  await db.doc(path).set(profile ? { penName: 'Wren', note: 'A long day.' } : { authorUid: writer, body: 'A long day.', status: 'published', createdAt: new Date() })
   const queued = db.doc(`modQueue/${path.replaceAll('/', '~')}`)
 
-  // One at a time, on the server's clock as the rules set it
+  // On the server's clock as the rules set it, with what they wrote under 'Anything else'
+  const file = async (reporterUid: string, reason: string, details?: string) => {
+    const ref = await db.collection('reports').add({ reporterUid, contentPath: path, reason, ...(details ? { details } : {}), createdAt: FieldValue.serverTimestamp() })
+    await handleReport((await ref.get()).data())
+  }
+  // One at a time; 'a:selfHarm' gives a reason of its own
   const report = async (...who: string[]) => {
-    for (const name of who) {
-      const ref = await db.collection('reports').add({ reporterUid: uids[name], contentPath: path, reason: 'harassment', createdAt: FieldValue.serverTimestamp() })
-      await handleReport((await ref.get()).data())
+    for (const step of who) {
+      const [name, reason = 'harassment'] = step.split(':')
+      await file(uids[name], reason)
     }
   }
   const keep = async () => {
@@ -58,7 +73,13 @@ const setUp = async (names: string[], { profile = false } = {}) => {
     await queued.update({ state: 'resolved', resolution: 'approved', resolvedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() })
   }
   const status = async () => (await db.doc(path).get()).get('status')
-  return { uids, queued, report, keep, status }
+  // What the Review page shows a moderator of what reporters wrote
+  const shown = async () => {
+    const item = (await queued.get()).data() as Entry
+    const filed = (await db.collection('reports').where('contentPath', '==', path).get()).docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Filed)
+    return reportDetails(item, filed, fresh('moderator')).map(({ reason, details }) => `${reason}: ${details}`)
+  }
+  return { uids, writer, queued, file, report, keep, status, shown }
 }
 
 describe('rounds of reports', () => {
@@ -85,12 +106,57 @@ describe('rounds of reports', () => {
     await keep()
     await report('d')
 
-    await purgeAccount(uids.a)
-    await purgeAccount(uids.d)
+    const bucket = vi.spyOn(handlerStorage, 'bucket')
+    try {
+      await purgeAccount(uids.a)
+      await purgeAccount(uids.d)
+      expect(bucket).not.toHaveBeenCalled()
+    } finally {
+      bucket.mockRestore()
+    }
     const item = (await queued.get()).data()
     expect(item).toMatchObject({ state: 'open', reports: { reporterUids: [] } })
     expect(JSON.stringify(item)).not.toContain(uids.a)
     expect(JSON.stringify(item)).not.toContain(uids.d)
+  })
+
+  it('keeps a reason someone in the round adds later, counting them once and hiding nothing', async () => {
+    const queries = vi.spyOn(handlerDb, 'collection')
+    const reads = () => queries.mock.calls.filter(([name]) => name === 'reports').length
+    try {
+      const { uids, queued, report, keep, status } = await setUp(['a', 'b', 'c'])
+      await report('a', 'b', 'a:selfHarm')
+      expect((await queued.get()).data()).toMatchObject({ priority: 2, reports: { count: 2, reasons: ['harassment', 'selfHarm'], reporterUids: [uids.a, uids.b] } })
+      expect(await status()).toBe('published')
+
+      // Three who reported it before a moderator kept it: c joining reads, c's later reason doesn't
+      await report('c')
+      await keep()
+      await report('a', 'b', 'c')
+      expect(reads()).toBe(1)
+      await report('c:selfHarm', 'c:selfHarm')
+      expect(reads()).toBe(1)
+      expect(await status()).toBe('published')
+      expect((await queued.get()).data()).toMatchObject({ priority: 2, reports: { count: 3, reasons: ['harassment', 'selfHarm'] } })
+    } finally {
+      queries.mockRestore()
+    }
+  })
+
+  it('shows moderators what the open round’s reporters wrote, and nothing from anyone it turned away', async () => {
+    const { uids, writer, file, keep, shown } = await setUp(['a', 'b', 'c'])
+    await file(uids.a, 'other', 'Read with the decision')
+    await keep()
+    await file(uids.a, 'other', 'They made a third account to message me')
+    await file(writer, 'other', 'Ignore them, I am fine')
+    await file(fresh('outsider'), 'hate', 'Not in the group')
+    await file(uids.b, 'harassment')
+    await file(uids.c, 'impersonation', 'Pretending to be my sister')
+    expect(await shown()).toEqual(['other: They made a third account to message me', 'impersonation: Pretending to be my sister'])
+
+    // Gone with the account
+    await purgeAccount(uids.c)
+    expect(await shown()).toEqual(['other: They made a third account to message me'])
   })
 
   it('reads every report only when it could hide the writing, not for one person reporting over and over', async () => {

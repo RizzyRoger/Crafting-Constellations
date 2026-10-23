@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { approvalOf, leftAsIs, MAX_NOTE, moderatorNote, outcomeOf, removalOf } from './adminPolicy.js'
+import { approvalOf, crisisOnPublish, leftAsIs, MAX_NOTE, moderatorNote, outcomeOf, removalOf } from './adminPolicy.js'
 
 describe('approvalOf', () => {
   const at = { seconds: 1, nanoseconds: 0 }
@@ -29,6 +29,44 @@ describe('approvalOf', () => {
     expect(approvalOf({ kind: 'chatMessage', authorUid: 'w' })).toBe('undeliverable')
     expect(approvalOf({ kind: 'chatMessage', authorUid: 'w', chatUids: 'w' })).toBe('undeliverable')
   })
+
+  it('keeps held writing from a banned writer held, wherever it was written', () => {
+    expect(approvalOf({ kind: 'dm', authorUid: 'w', connectionStatus: 'accepted', authorBanned: true })).toBe('paused')
+    expect(approvalOf({ kind: 'post', authorUid: 'w', authorBanned: true })).toBe('paused')
+    expect(approvalOf({ kind: 'comment', authorUid: 'w', authorBanned: true })).toBe('paused')
+    expect(approvalOf({ kind: 'groupMessage', authorUid: 'w', authorBanned: true })).toBe('paused')
+    // A ban takes them off the chat too, and the ban is the reason to give
+    expect(approvalOf({ kind: 'chatMessage', authorUid: 'w', chatUids: ['x'], authorBanned: true })).toBe('paused')
+    expect(approvalOf({ kind: 'post', authorUid: 'w', authorBanned: false })).toBe('publish')
+  })
+
+  it('restores writing of a banned writer that went out before, as a ban leaves the rest of it up', () => {
+    expect(approvalOf({ kind: 'comment', authorUid: 'w', publishedAt: at, authorBanned: true })).toBe('restore')
+  })
+
+  it('never delivers a note its writer was told would not arrive, though the two connect again', () => {
+    expect(approvalOf({ kind: 'dm', authorUid: 'w', connectionStatus: 'accepted', undelivered: true })).toBe('undeliverable')
+    expect(approvalOf({ kind: 'dm', authorUid: 'w', connectionStatus: 'accepted', undelivered: false })).toBe('publish')
+  })
+})
+
+describe('crisisOnPublish', () => {
+  it('marks crisis language in a private note or chat, so both people get resources', () => {
+    expect(crisisOnPublish({ kind: 'dm', heldReason: 'crisis' })).toBe(true)
+    expect(crisisOnPublish({ kind: 'chatMessage', heldReason: 'crisis' })).toBe(true)
+    expect(crisisOnPublish({ kind: 'dm', automodCrisis: true })).toBe(true)
+  })
+
+  it('never marks group writing, whose crisis holds are for the writer alone', () => {
+    for (const kind of ['post', 'comment', 'groupMessage']) {
+      expect(crisisOnPublish({ kind, heldReason: 'crisis', automodCrisis: true })).toBe(false)
+    }
+  })
+
+  it('leaves a note held for anything else unmarked', () => {
+    expect(crisisOnPublish({ kind: 'dm', heldReason: 'review', automodCrisis: false })).toBe(false)
+    expect(crisisOnPublish({ kind: 'chatMessage' })).toBe(false)
+  })
 })
 
 describe('removalOf', () => {
@@ -53,6 +91,7 @@ describe('outcomeOf', () => {
     expect(outcomeOf('publish')).toBe('published')
     expect(outcomeOf('restore')).toBe('restored')
     expect(outcomeOf('undeliverable')).toBe('undelivered')
+    expect(outcomeOf('paused')).toBe('paused')
   })
 
   it('tells the moderator what Remove did, and when there was nothing to take down', () => {

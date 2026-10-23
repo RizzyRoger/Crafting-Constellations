@@ -56,3 +56,47 @@ export const earliestFirst = () => {
     if (!queue) queueMicrotask(() => next(key))
   }
 }
+
+// Auth's account for a caller, or none when it has no record of one. Any other failure (Auth
+// unreachable, a quota, a key that won't refresh) is the server's trouble, not the caller's: it is
+// passed on, so the call fails as internal, as on Cloud Functions, instead of asking a signed-in
+// person to sign in
+export const userOrNone = <T>(lookup: Promise<T>) =>
+  lookup.catch((error: { code?: unknown } | undefined) => {
+    if (error?.code === 'auth/user-not-found') return null
+    throw error
+  })
+
+// FIREBASE_CONFIG for the backend: the one it was given, or just the project with no Storage
+// bucket (Storage isn't available without Blaze, so account deletion skips it). On the emulators a
+// bucket counts only beside the Storage emulator: emulators:exec names one of its own accord, and
+// with no Storage emulator the purge would reach the real Cloud Storage.
+export const firebaseConfigFor = (projectId: string, env: Record<string, string | undefined>) => {
+  const realStorageFromEmulators = Boolean(env.FIRESTORE_EMULATOR_HOST) && !env.FIREBASE_STORAGE_EMULATOR_HOST
+  return env.FIREBASE_CONFIG && !realStorageFromEmulators ? env.FIREBASE_CONFIG : JSON.stringify({ projectId })
+}
+
+// Waits for work, but for `ms` at most
+export const within = async (work: Promise<unknown>, ms: number) => {
+  let timer: NodeJS.Timeout | undefined
+  await Promise.race([work, new Promise((resolve) => (timer = setTimeout(resolve, ms)))])
+  clearTimeout(timer)
+}
+
+// Work under way, so stopping can wait for it for a while and learn what it had to leave
+// unfinished. A failure is the work's own to report: here it only counts as ended.
+export const underWay = <T>() => {
+  const running = new Set<{ item: T; ended: Promise<void> }>()
+  return {
+    add: (item: T, work: Promise<unknown>) => {
+      const entry = { item, ended: work.then(() => undefined, () => undefined) }
+      running.add(entry)
+      void entry.ended.then(() => running.delete(entry))
+    },
+    // Waits up to `ms` for everything under way; what is still going then
+    settle: async (ms: number) => {
+      await within(Promise.all([...running].map((entry) => entry.ended)), ms)
+      return [...running].map((entry) => entry.item)
+    },
+  }
+}
