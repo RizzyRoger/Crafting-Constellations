@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyFlood, FLOOD_MAX, FLOOD_WINDOW_MS } from './flood'
+import { applyFlood, FLOOD_LOG_MAX, FLOOD_MAX, FLOOD_WINDOW_MS } from './flood'
 
 describe('write flood', () => {
   const now = 1_000_000
@@ -24,5 +24,52 @@ describe('write flood', () => {
   it('ignores a missing or junk log', () => {
     expect(applyFlood(undefined, now).flooded).toBe(false)
     expect(applyFlood(['nope', now], now).stamps).toEqual([now, now])
+  })
+
+  it('counts only notes written before this one, however late it is judged', () => {
+    const later = Array.from({ length: FLOOD_MAX }, (_, i) => now + (i + 1) * 1000)
+    expect(applyFlood(later, now).flooded).toBe(false)
+  })
+
+  it('keeps every stamp in the window when an older note is judged last', () => {
+    const later = Array.from({ length: 60 }, (_, i) => now + (i + 1) * 1000)
+    expect(applyFlood(later, now).stamps).toEqual([now, ...later])
+  })
+
+  it('keeps the newest stamps once the log is full', () => {
+    const later = Array.from({ length: FLOOD_LOG_MAX }, (_, i) => now + (i + 1) * 1000)
+    expect(applyFlood(later, now).stamps).toEqual(later)
+  })
+
+  // Notes judged one after another in this order, as the backend catches up; the ones held
+  const held = (order: number[]) =>
+    order.reduce<{ log: unknown; held: number[] }>(
+      ({ log, held }, writtenAt) => {
+        const next = applyFlood(log, writtenAt)
+        return { log: next.stamps, held: next.flooded ? [...held, writtenAt] : held }
+      },
+      { log: undefined, held: [] },
+    ).held
+
+  it('judges a slow backlog as it was written, in any order', () => {
+    // Twelve notes three minutes apart, written while the backend was off
+    const written = Array.from({ length: 12 }, (_, i) => now + i * 3 * 60_000)
+    const shuffled = [5, 0, 11, 3, 8, 1, 10, 6, 2, 9, 4, 7].map((i) => written[i])
+    expect(held(written)).toEqual([])
+    expect(held([...written].reverse())).toEqual([])
+    expect(held(shuffled)).toEqual([])
+  })
+
+  it('still holds a real burst judged in the order it was written', () => {
+    const written = Array.from({ length: 12 }, (_, i) => now + i * 10_000)
+    expect(held(written)).toEqual(written.slice(FLOOD_MAX))
+  })
+
+  it('still holds a burst judged out of order, once the notes before it are known', () => {
+    // Sixty notes a second apart, judged in two batches of thirty, each newest first
+    const written = Array.from({ length: 60 }, (_, i) => now + i * 1000)
+    const first = written.slice(0, 30).reverse()
+    const second = written.slice(30).reverse()
+    expect(held([...first, ...second])).toEqual(second)
   })
 })

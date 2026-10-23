@@ -2,28 +2,126 @@ import { RESERVED_NAME_WORDS } from './lexicon.js'
 import { moderate } from './moderate.js'
 import { normalize } from './normalize.js'
 
-export type PenNameProblem = 'length' | 'characters' | 'contact' | 'reserved' | 'unkind'
+export type PenNameProblem = 'length' | 'characters' | 'mixed' | 'contact' | 'reserved' | 'unkind'
 
 export type PenNameCheck = { ok: true; value: string } | { ok: false; problem: PenNameProblem }
 
 export const PEN_NAME_HINTS: Record<PenNameProblem, string> = {
   length: 'Between 2 and 32 characters.',
-  characters: 'Letters, numbers, spaces, and . \' - only.',
+  characters: 'Letters and numbers, with spaces and . \' - only.',
+  mixed: 'Keep to one alphabet, so no letter can pass for another.',
   contact: 'No emails or long numbers — a pen name keeps you private.',
   reserved: 'Pen names can’t suggest a title or role. Professionals get a licensed mark instead.',
   unkind: 'Choose a different name.',
 }
 
-export const tidyPenName = (name: string) => name.normalize('NFKC').replace(/\s+/g, ' ').trim()
+// Phones type curly apostrophes and Unicode hyphens ("O’Neil"). Neither was
+// ever allowed, so no saved name tidies any differently.
+export const tidyPenName = (name: string) =>
+  name.normalize('NFKC').replace(/[\u2018\u2019]/g, "'").replace(/[\u2010\u2011]/g, '-').replace(/\s+/g, ' ').trim()
 
-export const checkPenName = (input: string): PenNameCheck => {
+// Letters and numbers, each with up to three combining marks (vowel signs in
+// Hindi, Tamil or Thai stay marks after NFKC), and . ' - between
+const NAME_CHARS = /^(?:[\p{L}\p{N}][\p{Mn}\p{Mc}]{0,3}|[ .'-])+$/u
+
+// Fillers, joiners and variation selectors show as nothing: a blank name, or
+// one that looks like someone else's
+const HIDDEN = /\p{Default_Ignorable_Code_Point}/u
+
+// Marks that make one letter pass for another, which no name needs: a dot
+// above an i or j sits on its own dot, a dotless ı or ȷ with a dot or accent
+// looks like an i or j with one, a slash or stroke laid through a letter
+// copies a letter that has it ("o" and a slash for "ø"), marks made for
+// symbols do the same, and the same mark twice draws as one. Read with each
+// letter's own marks split off (NFD), so an "é" then an acute is one twice.
+const LOOKALIKE_MARKS = /\p{Soft_Dotted}\p{M}*\u0307|[\u0131\u0237]\p{M}|[\u0334-\u0338\u20d0-\u20ff]|(\p{Mn})\1/u
+
+// Nothing hidden or disguised, and at least one letter or number, so ".." or
+// "--" isn't a name
+const isMadeOfNameCharacters = (value: string) =>
+  NAME_CHARS.test(value) && /[\p{L}\p{N}]/u.test(value) && !HIDDEN.test(value) && !LOOKALIKE_MARKS.test(value.normalize('NFD'))
+
+// Alphabets with letters that pass for each other's. A name that mixes them
+// looks like another ("Fеrn" or "Ѕӏоԝ River" with Cyrillic letters), or a
+// title ("Аdmin"). Other scripts, such as kana or Devanagari, mix freely.
+const LOOKALIKE_SCRIPTS = ['Latin', 'Cyrillic', 'Greek', 'Armenian', 'Cherokee', 'Lisu'].map(
+  (script) => new RegExp(`\\p{Script=${script}}`, 'u'),
+)
+
+const mixesScripts = (value: string) => LOOKALIKE_SCRIPTS.filter((script) => script.test(value)).length > 1
+
+// A reserved word as a whole word, or its plural ("Moderators", "Admin's").
+// Chat names refuse only the word itself.
+const RESERVED = new RegExp(`^(?:${RESERVED_NAME_WORDS.join('|')})s?$`, 'u')
+const RESERVED_SINGULAR = new RegExp(`^(?:${RESERVED_NAME_WORDS.join('|')})$`, 'u')
+
+// Latin letters that NFKC leaves alone but that read as a plain one: small
+// capitals, read as capitals ("ᴀdmin", "Siteᴀdmin"), the Latin alpha and
+// script g ("ɑdmin"), a dotless i or j and the Latin iota ("Admın"). Read as
+// plain letters only to find a role, so names written with them tidy and pass
+// as before.
+const PLAIN_LETTERS: Record<string, string> = {
+  '\u1d00': 'A', '\u0299': 'B', '\u1d04': 'C', '\u1d05': 'D', '\u1d07': 'E', '\ua730': 'F', '\u0262': 'G',
+  '\u029c': 'H', '\u026a': 'I', '\u1d0a': 'J', '\u1d0b': 'K', '\u029f': 'L', '\u1d0d': 'M', '\u0274': 'N',
+  '\u1d0f': 'O', '\u1d18': 'P', '\ua7af': 'Q', '\u0280': 'R', '\ua731': 'S', '\u1d1b': 'T', '\u1d1c': 'U',
+  '\u1d20': 'V', '\u1d21': 'W', '\u028f': 'Y', '\u1d22': 'Z',
+  '\u0251': 'a', '\u0261': 'g', '\u0131': 'i', '\u0237': 'j', '\u0269': 'i',
+}
+const LOOKALIKE_LETTERS = new RegExp(`[${Object.keys(PLAIN_LETTERS).join('')}]`, 'gu')
+const plainLetters = (value: string) => value.replace(LOOKALIKE_LETTERS, (letter) => PLAIN_LETTERS[letter] ?? letter)
+
+// MD, RN and NP are titles after a name ("JoyRN"). Starting a joined word
+// they're something else ("MdRahim", Md for Muhammad; "RnB Lover"; "NPFan"),
+// so pulling apart leaves them out there. Dr starts a name ("DrHeron").
+const SHORT_FORMS = ['md', 'rn', 'np']
+
+// The digits the words view reads as letters: "1" as "i", "4" as "a"
+const readsAsLetter = (digit: string) => /^\p{L}$/u.test(normalize(digit).words)
+
+// A number, and the digit in it that may be a letter: one digit inside a word
+// ("Adm1n"), or for FIRST_LETTER the last digit of any number a word runs on
+// from ("4dmin2", "24dmin"). Never where a new word starts ("Nurse1Joy").
+const LETTER_IN_WORD = /(?<=[\p{L}\p{M}])(\p{N})(?=[\p{L}\p{M}])(?!\p{Lu}\p{Ll})|\p{N}+/gu
+const FIRST_LETTER = /\p{N}*(\p{N})(?=[\p{L}\p{M}])(?!\p{Lu}\p{Ll})|\p{N}+/gu
+
+// Joined words pulled apart ("SiteAdmin", "DRHeron"), and each number split
+// off whole, in any case ("Nurse2Joy", "nurse2joy", "2admin", "Admin12"),
+// which the words view would read as letters ("admini"). A digit caught above
+// that reads as a letter stays one ("Adm1n", "Dr4gon"), and the rest of its
+// number splits off ("24dmin").
+const pullApart = (value: string, letters = LETTER_IN_WORD) =>
+  value
+    .replace(/(?<![\p{L}\p{M}\p{N}])\p{L}{2}(?=\p{Lu})/gu, (start) => (SHORT_FORMS.includes(start.toLowerCase()) ? '' : start))
+    .replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2')
+    .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, '$1 $2')
+    .replace(letters, (number, letter?: string) => {
+      if (!letter || !readsAsLetter(letter)) return ` ${number} `
+      const rest = number.slice(0, -letter.length)
+      return rest ? ` ${rest} ${letter}` : letter
+    })
+
+// A digit starting a word may be a number ("1admin") or the word's first
+// letter ("4dmin2"), so both are read
+const suggestsRole = (value: string, reserved: RegExp) => {
+  const plain = plainLetters(value)
+  return [plain, pullApart(plain), pullApart(plain, FIRST_LETTER)].some((view) => {
+    const { words, joined } = normalize(view)
+    return `${words} ${joined}`.split(' ').some((word) => reserved.test(word))
+  })
+}
+
+// Chat and group names ({ chat: true }) name a conversation, not a person, so
+// they can't pass for someone: a plural ("Questions for doctors") or a second
+// alphabet ("Мама and Dad") is fine there. A role word, or one word that mixes
+// alphabets ("Аdmin"), still isn't.
+export const checkPenName = (input: string, { chat = false } = {}): PenNameCheck => {
   const value = tidyPenName(input)
   if (value.length < 2 || value.length > 32) return { ok: false, problem: 'length' }
-  if (!/^[\p{L}\p{N} .'-]+$/u.test(value)) return { ok: false, problem: 'characters' }
+  if (!isMadeOfNameCharacters(value)) return { ok: false, problem: 'characters' }
+  if (chat ? value.split(' ').some(mixesScripts) : mixesScripts(value)) return { ok: false, problem: 'mixed' }
   if (/\d{6,}/.test(value)) return { ok: false, problem: 'contact' }
 
-  const words = normalize(value).words.split(' ')
-  if (words.some((w) => RESERVED_NAME_WORDS.includes(w))) return { ok: false, problem: 'reserved' }
+  if (suggestsRole(value, chat ? RESERVED_SINGULAR : RESERVED)) return { ok: false, problem: 'reserved' }
   if (moderate(value, { context: 'public' }).action === 'hold') return { ok: false, problem: 'unkind' }
   return { ok: true, value }
 }

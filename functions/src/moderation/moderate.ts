@@ -10,6 +10,7 @@ import {
   PHONE,
   PHONE_ALLOWLIST,
   SELF_HARM,
+  SERVICE_PHONE,
   SLUR,
   type Category,
 } from './lexicon.js'
@@ -30,12 +31,16 @@ export interface ModerationResult {
   version: string
 }
 
-const hostOf = (link: string) =>
-  link
-    .replace(/^https?:\/\//, '')
-    .replace(/^www\./, '')
-    .split(/[/?#:]/)[0]
-    .replace(/\.$/, '')
+// The host a browser would open: "evil.com\.nhs.uk" goes to evil.com, and
+// "nhs.uk@evil.com" signs in to evil.com, so neither has an allowed host
+const hostOf = (link: string) => {
+  try {
+    const url = new URL(/^https?:\/\//.test(link) ? link : `https://${link}`)
+    return url.username || url.password ? '' : url.hostname.replace(/\.$/, '')
+  } catch {
+    return ''
+  }
+}
 
 export const isAllowedLink = (link: string) => {
   const host = hostOf(link.toLowerCase())
@@ -45,17 +50,28 @@ export const isAllowedLink = (link: string) => {
 const firstMatch = (patterns: RegExp[], texts: string[]) =>
   patterns.flatMap((p) => texts.map((t) => t.match(p)?.[0])).find((m): m is string => Boolean(m))
 
-const findLinks = (raw: string) => raw.replace(EMAIL, ' ').match(LINK) ?? []
+// Emails and links in one pass, so an email's domain is not read as a link,
+// and an @ inside a link is not read as an email ("https://nhs.uk@evil.com")
+const LINK_OR_EMAIL = new RegExp(`(${EMAIL.source})|${LINK.source}`, 'gu')
 
-const findPhone = (raw: string) =>
-  PHONE.map((p) => raw.match(p)?.[0] ?? '').find((m) => m !== '' && !PHONE_ALLOWLIST.includes(m.replace(/\D/g, '')))
+const findLinks = (raw: string) => [...raw.matchAll(LINK_OR_EMAIL)].filter((m) => !m[1]).map((m) => m[0])
+
+const isPersonalPhone = (match: string) => {
+  const digits = match.replace(/\D/g, '')
+  if (PHONE_ALLOWLIST.includes(digits)) return false
+  return !digits.startsWith('0') || (digits.length >= 10 && digits.length <= 11 && !SERVICE_PHONE.test(digits))
+}
+
+const findPhone = (raw: string) => PHONE.flatMap((p) => raw.match(p) ?? []).find(isPersonalPhone)
 
 export const moderate = (text: string, { context = 'public' }: { context?: Context } = {}): ModerationResult => {
-  const { raw, words, joined, unmarked } = normalize(text)
-  const views = [...new Set([words, joined, unmarked])]
+  const { raw, words, joined, unmarked, folded, leet, squeezed, clauses } = normalize(text)
+  const views = [...new Set([words, joined, unmarked, folded, squeezed, clauses])]
   const matches: Match[] = []
 
-  const slur = firstMatch([SLUR], views)
+  // Only slurs read a final ! as an "i": elsewhere it would glue onto an
+  // everyday word and hide what makes it everyday ("on holiday!")
+  const slur = firstMatch([SLUR], [...views, leet])
   if (slur) matches.push({ category: 'slur', term: slur })
 
   const harassment = firstMatch(HARASSMENT, views)
