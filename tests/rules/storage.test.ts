@@ -6,8 +6,8 @@ import {
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing'
 import { doc, setDoc, setLogLevel, type Firestore } from 'firebase/firestore'
-import { getBytes, ref, uploadBytes, type FirebaseStorage } from 'firebase/storage'
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest'
+import { getBytes, getMetadata, ref, uploadBytes, type FirebaseStorage } from 'firebase/storage'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 let env: RulesTestEnvironment
 
@@ -58,5 +58,13 @@ describe('professional documents', () => {
     await assertSucceeds(getBytes(ref(storageAs('dora'), 'proDocs/dora/doc-1')))
     await assertSucceeds(getBytes(ref(storageAs('mia', { email_verified: true, admin: true }), 'proDocs/dora/doc-1')))
     await assertFails(getBytes(ref(storageAs('bob'), 'proDocs/dora/doc-1')))
+  })
+
+  // The page looks before it picks slots, so a file left by a failed attempt is skipped, not overwritten
+  it('an owner can tell a used slot from a free one; nobody else can look', async () => {
+    await assertSucceeds(upload(storageAs('erin'), 'proDocs/erin/doc-1'))
+    await assertSucceeds(getMetadata(ref(storageAs('erin'), 'proDocs/erin/doc-1')))
+    await expect(getMetadata(ref(storageAs('erin'), 'proDocs/erin/doc-2'))).rejects.toMatchObject({ code: 'storage/object-not-found' })
+    await assertFails(getMetadata(ref(storageAs('bob'), 'proDocs/erin/doc-1')))
   })
 })
