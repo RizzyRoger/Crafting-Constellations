@@ -11,6 +11,7 @@ import { Me } from './Me'
 vi.mock('../lib/firebase', () => ({ db: {}, auth: {} }))
 vi.mock('../lib/telemetry', () => ({ TELEMETRY_AVAILABLE: true, useCountVisits: () => null, setCountVisits: vi.fn() }))
 vi.mock('../components/ProfileForm', () => ({ ProfileForm: () => null }))
+vi.mock('../components/CheckIn', () => ({ CheckIn: () => null }))
 vi.mock('../auth/AuthProvider', () => ({
   useMe: () => ({
     uid: 'alice',

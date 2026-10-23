@@ -13,7 +13,6 @@ export const Plate = ({ as = 'p', link = false }: { as?: 'h1' | 'p'; link?: bool
       ) : (
         name
       )}
-      <p className="plate__line code">PB29 / PBk6 — low staining — semitransparent — granulating</p>
     </div>
   )
 }
