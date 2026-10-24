@@ -18,6 +18,10 @@ const state = vi.hoisted(() => ({
   commits: [] as number[],
   errors: [] as unknown[],
   answered: [] as [string, string][],
+  // Written here and not yet confirmed by the server
+  local: new Set<string>(),
+  // The path of every query the page asked
+  asked: [] as string[],
 }))
 
 vi.mock('../lib/firebase', () => ({ db: {}, auth: {}, LOCAL_BACKEND: true }))
@@ -74,10 +78,14 @@ const millis = (d: Data) => (d.createdAt as { toMillis: () => number }).toMillis
 const matches = (d: Data, [field, op, value]: [string, string, unknown]) =>
   op === 'array-contains' ? Array.isArray(d[field]) && d[field].includes(value) : op === '==' && d[field] === value
 
+// A document in the collection asked of: one path, or every collection of a name ('**/name')
+const within = (p: string, path: string) =>
+  path.startsWith('**/') ? p.split('/').at(-2) === path.slice(3) : p.startsWith(`${path}/`) && !p.slice(path.length + 1).includes('/')
+
 // A query run against the store, as Firestore would answer it
 const run = ({ path, constraints }: Asked) => {
   const rows = [...state.store.entries()]
-    .filter(([p]) => p.startsWith(`${path}/`) && !p.slice(path.length + 1).includes('/'))
+    .filter(([p]) => within(p, path))
     .map(([p, d]) => ({ id: p.split('/').pop()!, path: p, ...d }) as Data)
     .filter((d) => constraints.every((c) => !c.where || matches(d, c.where)))
   const order = constraints.find((c) => c.orderBy)?.orderBy
@@ -86,8 +94,15 @@ const run = ({ path, constraints }: Asked) => {
   return cap ? rows.slice(0, cap) : rows
 }
 
+// Rows asked for with `pending` say whether they're only written here so far
 vi.mock('../lib/live', () => ({
-  useQueryData: (key: string | null, build: () => Asked) => ({ data: key ? run(build()) : [], loading: false, error: null }),
+  useQueryData: (key: string | null, build: () => Asked, { pending = false } = {}) => {
+    if (!key) return { data: [], loading: false, error: null }
+    const asked = build()
+    state.asked.push(asked.path)
+    const rows = run(asked)
+    return { data: pending ? rows.map((d) => ({ ...d, pending: state.local.has(d.path as string) })) : rows, loading: false, error: null }
+  },
   useDocData: () => ({ data: null, loading: false, error: null, pending: false }),
 }))
 
@@ -142,6 +157,8 @@ beforeEach(() => {
   state.commits = []
   state.errors = []
   state.answered = []
+  state.local.clear()
+  state.asked = []
 })
 
 describe('Mark all read', () => {
@@ -273,5 +290,52 @@ describe('A removed notice', () => {
     const html = markup()
     expect(html).toContain('A moderator removed something you wrote, because it didn’t fit the group’s guidelines.')
     expect(html).not.toContain('reset your pen name')
+  })
+})
+
+// Leaving Daily check-in lasts for the visit: the shell joins again on the next one, with a write
+// that's local at first. A listen on member-only writing that the rules judge before the server has
+// the membership is refused, and the row would say the writing is gone for the rest of the visit
+describe('A notice about Daily check-in writing', () => {
+  const POST = 'groups/daily-check-in/posts/p1'
+  const MEMBER = 'groups/daily-check-in/members/alice'
+  const NOTICES: [string, string, string][] = [
+    ['a comment on her check-in', 'comment', `${POST}/comments/c1`],
+    ['a mention in a check-in', 'mention', 'groups/daily-check-in/posts/p2'],
+  ]
+
+  // Written while she was a member; the notice stays after she leaves
+  const told = (type: string, contentPath: string) => {
+    const written = at(Date.now() - 60_000)
+    state.store.set('groups/daily-check-in', { name: 'Daily check-in' })
+    state.store.set(POST, { authorUid: 'alice', status: 'published', body: 'Slept badly again.', createdAt: at(Date.now() - 120_000) })
+    state.store.set(contentPath, { authorUid: 'bob', status: 'published', text: 'Thinking of you today, @alice.', body: 'Thinking of you today, @alice.', createdAt: written })
+    state.store.set('users/alice/notices/n0', { type, actorUid: 'bob', contentPath, contentAt: written, createdAt: at(Date.now()), seen: false })
+  }
+
+  const askedOfCheckIn = () => state.asked.filter((path) => path.startsWith('groups/daily-check-in/'))
+
+  it.each(NOTICES)('reads nothing of %s while the join is only local, then the words once the server has it', (_, type, contentPath) => {
+    told(type, contentPath)
+    state.store.set(MEMBER, { uid: 'alice' })
+    state.local.add(MEMBER)
+    const joining = markup()
+    expect(askedOfCheckIn()).toEqual([])
+    expect(joining).not.toContain('No longer here.')
+    expect(joining).not.toContain('no longer in this group')
+    expect(joining).toContain('Daily check-in')
+
+    state.local.delete(MEMBER)
+    const joined = markup()
+    expect(askedOfCheckIn()).toEqual([contentPath.slice(0, contentPath.lastIndexOf('/'))])
+    expect(joined).toContain('Thinking of you today')
+    expect(joined).not.toContain('No longer here.')
+  })
+
+  it('says she is no longer in it when there is no membership, and reads nothing', () => {
+    told('comment', `${POST}/comments/c1`)
+    const html = markup()
+    expect(askedOfCheckIn()).toEqual([])
+    expect(html).toContain('You’re no longer in this group or chat.')
   })
 })

@@ -137,6 +137,13 @@ describe('describeError', () => {
     expect(message).not.toBe('Something went wrong. Try again in a moment.')
   })
 
+  it('sends Google on an email that signs in with a password to the password, instead of asking to try again', async () => {
+    const { describeError } = await load(true)
+    const message = describeError(new FirebaseError('auth/account-exists-with-different-credential', 'x'))
+    expect(message).toContain('password')
+    expect(message).not.toBe('Something went wrong. Try again in a moment.')
+  })
+
   it('says a missing item is gone, instead of asking to try again', async () => {
     const { describeError } = await load(true)
     expect(describeError(new FirebaseError('functions/not-found', 'queue item'))).toBe('That isn’t there any more.')
@@ -159,5 +166,22 @@ describe('describeError', () => {
     const { describeError } = await load(true)
     expect(describeError(new FirebaseError('auth/something-new', 'x'))).toBe('Something went wrong. Try again in a moment.')
     expect(describeError(new Error('x'))).toBe('Something went wrong. Try again in a moment.')
+  })
+})
+
+describe('resetRefusal', () => {
+  it('names what stopped a reset link that is the same for every address', async () => {
+    const { resetRefusal } = await load(true)
+    expect(resetRefusal(new FirebaseError('auth/network-request-failed', 'x'))).toBe('No connection. Check your internet and try again.')
+    expect(resetRefusal(new FirebaseError('auth/invalid-email', 'x'))).toBe('That doesn’t look like an email address.')
+    expect(resetRefusal(new FirebaseError('auth/too-many-requests', 'x'))).toBe('Too many tries. Wait a minute, then try again.')
+  })
+
+  it('leaves anything that could depend on the account to the note a sent link gets', async () => {
+    const { resetRefusal } = await load(true)
+    for (const code of ['auth/user-not-found', 'auth/user-disabled', 'auth/invalid-recipient-email', 'auth/something-new']) {
+      expect(resetRefusal(new FirebaseError(code, 'x')), code).toBeNull()
+    }
+    expect(resetRefusal(new Error('x'))).toBeNull()
   })
 })

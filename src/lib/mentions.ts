@@ -30,7 +30,9 @@ export const insertMention = (text: string, start: number, caret: number, penNam
 
 // Names that start with the query first, then names with a word that does; alphabetical within each
 export const matchPeople = <T extends { penName: string }>(people: readonly T[], query: string, max = 6): T[] => {
-  const q = query.toLowerCase()
+  // Read the way saved names are tidied (tidyPenName): a phone types "O’Neil" with a curly
+  // apostrophe. Not trimmed, so the space after a whole name still closes the list
+  const q = query.normalize('NFKC').replace(/[\u2018\u2019]/g, "'").replace(/[\u2010\u2011]/g, '-').toLowerCase()
   const rank = (name: string) => {
     const lower = name.toLowerCase()
     if (lower.startsWith(q)) return 0
@@ -44,11 +46,14 @@ export const matchPeople = <T extends { penName: string }>(people: readonly T[],
     .map((match) => match.person)
 }
 
-// The picked people whose @name is still in the words, as the server will check
-export const keptMentions = (text: string, picked: ReadonlyMap<string, string>) => {
+// The picks (uid to pen name) whose @name is still in the words
+export const picksIn = (text: string, picked: ReadonlyMap<string, string>): ReadonlyMap<string, string> => {
   const named = mentionedIn(text, [...picked].map(([uid, penName]) => ({ uid, penName })))
-  return [...picked.keys()].filter((uid) => named.has(uid)).slice(0, MAX_MENTIONS)
+  return new Map([...picked].filter(([uid]) => named.has(uid)))
 }
+
+// The picked people whose @name is still in the words, as the server will check
+export const keptMentions = (text: string, picked: ReadonlyMap<string, string>) => [...picksIn(text, picked).keys()].slice(0, MAX_MENTIONS)
 
 // A key the IME is using: still composing, or (Safari) the Enter that confirmed
 // it, which arrives just after compositionend with keyCode 229

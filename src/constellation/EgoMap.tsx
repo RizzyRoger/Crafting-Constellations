@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import type { Profile } from '../lib/types'
-import { click, dragOf, holdsPage, IDLE, lift, markDragged, pressDot, type Gesture } from './egoGesture'
+import { click, dragOf, forgetGone, holdsPage, IDLE, lift, markDragged, pressDot, type Gesture } from './egoGesture'
 import { egoCircle, layoutEgo, type EgoTie } from './egoLayout'
 import { atRest, holdAt, settle, startSim, stepSim, type Hold, type Sim } from './egoPhysics'
 import { describeDot } from './inWords'
@@ -60,6 +60,15 @@ export const EgoMap = ({ me, people, friendships, pending, blocked, waiting, sha
     if (!layout) return
     sim.current = startSim(layout, me, sim.current)
     setFrame(sim.current)
+    // A dot that leaves mid-press (a live change) takes the handler for its pointer's lift with it,
+    // so the press and any drag end here. The loop then stops at the new rest
+    const onChart = new Set(layout.nodes.map((node) => node.uid))
+    const kept = forgetGone(gesture.current, hold.current, (uid) => onChart.has(uid))
+    gesture.current = kept.gesture
+    if (hold.current && !kept.hold) {
+      hold.current = null
+      setDragging(null)
+    }
   }, [layout, me])
 
   useEffect(

@@ -10,6 +10,7 @@ import { LikeButton } from '../components/LikeButton'
 import { MentionText } from '../components/MentionText'
 import { PageHead } from '../components/PageHead'
 import { Quiet } from '../components/Quiet'
+import { Said, useSaid } from '../components/Said'
 import { Talk } from '../components/Talk'
 import { describeError } from '../lib/callables'
 import { db } from '../lib/firebase'
@@ -45,6 +46,7 @@ const RoomHost = ({ description, count }: { description?: string; count?: number
 const Posts = ({ group, me, verified, people }: { group: GroupDoc; me: string; verified: boolean; people: Profile[] }) => {
   const posts = useLiveContent<Post>(`groups/${group.id}/posts`, me, { max: 40 })
   const field = useRef<HTMLTextAreaElement>(null)
+  const [said, say] = useSaid(group.id)
 
   const publish = async (body: string, title: string | undefined, mentions: string[]) => {
     await addDoc(collection(db, `groups/${group.id}/posts`), {
@@ -81,6 +83,8 @@ const Posts = ({ group, me, verified, people }: { group: GroupDoc; me: string; v
       ) : (
         <ConfirmEmail />
       )}
+      {/* Outside the list, which goes with the last post withdrawn */}
+      <Said said={said} />
       {quiet ? null : (
         <ul className="post-list">
           {posts.data.map((p) => (
@@ -89,6 +93,7 @@ const Posts = ({ group, me, verified, people }: { group: GroupDoc; me: string; v
                 item={p}
                 me={me}
                 variant="card"
+                say={say}
                 actions={
                   // Liking needs a confirmed email; opening the post doesn't, and it's the only way
                   // into an untitled one and its comments

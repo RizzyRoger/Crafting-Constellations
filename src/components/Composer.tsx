@@ -1,7 +1,8 @@
 import { moderate, type Context } from '@moderation'
 import { useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from 'react'
+import { crisisOnly } from '../../functions/src/moderation/delivery'
 import { describeError } from '../lib/callables'
-import { imeKey, insertMention, keptMentions, matchPeople, mentionQuery } from '../lib/mentions'
+import { imeKey, insertMention, keptMentions, matchPeople, mentionQuery, picksIn } from '../lib/mentions'
 import type { Profile } from '../lib/types'
 import { Blot } from '../wash/Blot'
 
@@ -55,6 +56,7 @@ export const Composer = ({
   const [dismissed, setDismissed] = useState<number | null>(null)
   const [picked, setPicked] = useState<ReadonlyMap<string, string>>(new Map())
   const field = useRef<HTMLTextAreaElement>(null)
+  const sendButton = useRef<HTMLButtonElement>(null)
   const nextCaret = useRef<number | null>(null)
   // The words as they stand, for a send that lands after more was typed
   const draft = useRef({ text, title })
@@ -64,7 +66,8 @@ export const Composer = ({
   const bar = shape === 'bar' || expandable
 
   const preview = useMemo(() => (text.trim() ? moderate(`${title}\n${text}`, { context }) : null), [text, title, context])
-  const mayWait = preview?.action === 'hold' && !(context === 'private' && preview.crisis)
+  // As the server decides: private writing with crisis language alone goes out; anything else flagged too, it waits
+  const mayWait = preview?.action === 'hold' && !(context === 'private' && crisisOnly(preview))
   const waitNote = mayWait ? 'This may wait for a person to read it before others see it.' : ''
 
   const query = people && people.length > 0 ? mentionQuery(text, caret) : null
@@ -99,21 +102,30 @@ export const Composer = ({
     event.preventDefault()
     const body = text.trim()
     if (!body || sending) return
+    // Send is disabled while the words are on their way, and again once they've gone, which drops
+    // focus out of the page. Pressed, it hands focus to the field, where Ctrl+Enter leaves it
+    if (sendButton.current && document.activeElement === sendButton.current) field.current?.focus()
     const sent = { text, title }
     setSending(true)
     setError(null)
     try {
       await onSubmit(body, withTitle && title.trim() ? title.trim() : undefined, keptMentions(body, picked))
-      // Anything typed while it was on its way is the next message: clear only what went
-      const textWent = draft.current.text === sent.text
-      const titleWent = draft.current.title === sent.title
-      if (textWent) {
-        setText('')
-        setPicked(new Map())
-        setDismissed(null)
+      // Anything typed while it was on its way is the next message: take off only the words that
+      // went. Typed after them, the rest stays; if they were changed, the whole field does
+      const now = draft.current
+      const rest = now.text.startsWith(sent.text) ? now.text.slice(sent.text.length).trimStart() : now.text
+      const cut = now.text.length - rest.length
+      const titleWent = now.title === sent.title
+      if (cut > 0) {
+        setText(rest)
+        // A new value puts the caret at its end
+        setCaret(rest.length)
       }
+      // Keep only the picks still named in what's left, and a closed list's @ where it now stands
+      setPicked((m) => picksIn(rest, m))
+      setDismissed((at) => (rest && at !== null && at >= cut ? at - cut : null))
       if (titleWent) setTitle('')
-      if (textWent && titleWent) setOpen(false)
+      if (!rest && titleWent) setOpen(false)
     } catch (e) {
       setError(describeError(e))
     } finally {
@@ -220,7 +232,12 @@ export const Composer = ({
             {waitNote}
           </span>
         )}
-        <button type="submit" className={bar ? 'composer__send' : 'act act--wash'} disabled={disabled || sending || !text.trim()}>
+        <button
+          ref={sendButton}
+          type="submit"
+          className={bar ? 'composer__send' : 'act act--wash'}
+          disabled={disabled || sending || !text.trim()}
+        >
           {sending ? 'Sending…' : submitLabel}
         </button>
       </div>

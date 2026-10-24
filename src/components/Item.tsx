@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { useAuth } from '../auth/AuthProvider'
+import { focusForNow } from '../lib/focusForNow'
 import { isFirstClick } from '../lib/groupStanding'
 import { ago } from '../lib/time'
 import type { AuthorSnapshot, Content } from '../lib/types'
@@ -20,23 +21,32 @@ interface ItemProps {
   variant?: 'plain' | 'bubble' | 'card' | 'comment'
   // Private threads deliver crisis messages and show resources to both people
   privateThread?: boolean
+  // The page's own status (Said): withdrawn writing goes, and anything said inside it goes too
+  say?: (text: string) => void
 }
 
 // One piece of writing: who, when, its state, the words, and quiet actions
-export const Item = ({ item, me, children, actions, blotSize = 24, className = '', variant = 'plain', privateThread = false }: ItemProps) => {
+export const Item = ({ item, me, children, actions, blotSize = 24, className = '', variant = 'plain', privateThread = false, say }: ItemProps) => {
   const { profile } = useAuth()
   const [refused, setRefused] = useState<string | null>(null)
+  const bar = useRef<HTMLDivElement>(null)
   const mine = item.authorUid === me
   const author: AuthorSnapshot | undefined =
     item.author ?? (mine && profile ? { penName: profile.penName, avatarSeed: profile.avatarSeed, pigment: profile.pigment, pro: profile.pro } : undefined)
 
+  // Withdrawn writing drops out of the list at once, taking the focused button with it, so focus
+  // goes first to what stays around it: the conversation, the comments, or the page
   const takeBack = async () => {
+    const around = bar.current?.closest<HTMLElement>('[role="region"], section, main')
+    if (around) focusForNow(around, { preventScroll: true })
     setRefused(null)
-    setRefused(await withdraw(item.path))
+    const refusal = await withdraw(item.path)
+    setRefused(refusal)
+    if (!refusal) say?.('Withdrawn.')
   }
 
   const foot = (
-    <div className="item__actions">
+    <div ref={bar} className="item__actions">
       {actions}
       {mine ? (
         // Already withdrawn or removed: the rules refuse it again

@@ -7,6 +7,7 @@ import { Quiet } from '../components/Quiet'
 import { Talk } from '../components/Talk'
 import { Who } from '../components/Who'
 import { describeError } from '../lib/callables'
+import { useCurrentPath } from '../lib/currentPath'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import { findById } from '../lib/lookup'
@@ -22,14 +23,17 @@ export const Chat = () => {
   const { uid, claims } = useMe()
   const navigate = useNavigate()
   const location = useLocation()
+  const currentPath = useCurrentPath()
   const verified = claims.emailVerified
-  const [leaving, setLeaving] = useState(false)
+  // Which chat I'm leaving: another opened from the rail meanwhile keeps this page mounted, and
+  // isn't the one being left
+  const [leaving, setLeaving] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // Found among my chats, not by its document: that's refused once I've left (Back
   // after leaving, an old notice). Listeners close before leaving, so the rules
   // never see a reader they'd reject
-  const chats = useQueryData<ChatDoc>(verified && !leaving ? `chats|${uid}` : null, () =>
+  const chats = useQueryData<ChatDoc>(verified && leaving !== chatId ? `chats|${uid}` : null, () =>
     query(collection(db, 'chats'), where('uids', 'array-contains', uid)),
   )
   const chat = findById(chats.data, chatId)
@@ -43,23 +47,27 @@ export const Chat = () => {
       </Quiet>
     )
   }
-  if (leaving) return <Quiet>Leaving the chat…</Quiet>
+  if (leaving === chatId) return <Quiet>Leaving the chat…</Quiet>
   if (chats.loading) return <Quiet>Opening…</Quiet>
   if (!chat) return <Quiet>This chat isn’t yours to open.</Quiet>
 
   const members = chat.uids.map((id) => byId.get(id)).filter((p): p is Profile => Boolean(p))
 
   const leave = async () => {
-    setLeaving(true)
+    const from = location.pathname
+    setLeaving(chatId)
     setError(null)
     try {
       await new Promise((r) => setTimeout(r, 0))
       await leaveChat(chatId, uid)
-      navigate('/messages')
+      // It waits for the server, offline for as long as that lasts. Gone elsewhere by then, they
+      // stay on the page they chose, and the chat drops from the rail
+      if (currentPath() === from) return navigate('/messages')
     } catch (e) {
-      setError(describeError(e))
-      setLeaving(false)
+      if (currentPath() === from) setError(describeError(e))
     }
+    // Done, so this chat shows as it now is, whether they're still on it or come back to it later
+    setLeaving((current) => (current === chatId ? null : current))
   }
 
   return (

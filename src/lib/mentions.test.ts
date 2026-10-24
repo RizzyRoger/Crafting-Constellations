@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { imeKey, insertMention, keptMentions, matchPeople, mentionQuery } from './mentions'
+import { imeKey, insertMention, keptMentions, matchPeople, mentionQuery, picksIn } from './mentions'
 
 describe('mentionQuery', () => {
   it('finds the @name being typed at the caret', () => {
@@ -64,6 +64,18 @@ describe('matchPeople', () => {
     expect(matchPeople(people, '', 2)).toHaveLength(2)
     expect(matchPeople(people, 'zz')).toEqual([])
   })
+
+  it('reads a curly apostrophe or a Unicode hyphen as the one saved in the name, as a phone types it', () => {
+    const names = [{ penName: "O'Neil" }, { penName: "Mary's Garden" }, { penName: 'Ann-Marie' }]
+    expect(matchPeople(names, 'O\u2019').map((p) => p.penName)).toEqual(["O'Neil"])
+    expect(matchPeople(names, 'o\u2019n').map((p) => p.penName)).toEqual(["O'Neil"])
+    expect(matchPeople(names, 'Mary\u2019s').map((p) => p.penName)).toEqual(["Mary's Garden"])
+    expect(matchPeople(names, 'Ann\u2010M').map((p) => p.penName)).toEqual(['Ann-Marie'])
+  })
+
+  it('still closes the list on the space after a whole name', () => {
+    expect(matchPeople([{ penName: 'Fern' }], 'fern ')).toEqual([])
+  })
 })
 
 describe('keptMentions', () => {
@@ -84,6 +96,17 @@ describe('keptMentions', () => {
     ])
     expect(keptMentions('@Quiet Heron thank you', picked)).toEqual(['qh'])
     expect(keptMentions('@Quiet and @Quiet Heron', picked)).toEqual(['q', 'qh'])
+  })
+})
+
+describe('picksIn', () => {
+  it('keeps the picks whose name is still in the words, with their names', () => {
+    const picked = new Map([
+      ['f', 'Fern'],
+      ['q', 'Quiet Heron'],
+    ])
+    expect(picksIn('see you there @Fern', picked)).toEqual(new Map([['f', 'Fern']]))
+    expect(picksIn('see you there', picked).size).toBe(0)
   })
 })
 

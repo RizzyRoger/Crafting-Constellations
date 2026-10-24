@@ -3,7 +3,7 @@ import { GoogleAuthProvider, sendPasswordResetEmail, signInWithEmailAndPassword,
 import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { usePausedNote } from '../auth/pausedNote'
-import { describeError } from '../lib/callables'
+import { describeError, resetRefusal } from '../lib/callables'
 import { auth } from '../lib/firebase'
 import { returnTo } from '../lib/returnTo'
 import { trackSignIn } from '../lib/telemetry'
@@ -55,7 +55,12 @@ export const SignIn = () => {
     }
     // An older error would sit beside the note that a link is on its way
     setError(null)
-    await sendPasswordResetEmail(auth, email.trim()).catch(() => undefined)
+    // A request that didn't go through says why, unless the reason would tell whether the email has an account
+    const refusal = await sendPasswordResetEmail(auth, email.trim()).then(() => null, resetRefusal)
+    if (refusal) {
+      setError(refusal)
+      return
+    }
     setNote('If that email has an account, a reset link is on its way.')
   }
 

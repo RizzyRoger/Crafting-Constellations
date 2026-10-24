@@ -4,9 +4,11 @@ import { Report } from '../components/Report'
 import { Who } from '../components/Who'
 import { howToBlock } from '../lib/blocks'
 import { describeError } from '../lib/callables'
+import { isFirstClick } from '../lib/groupStanding'
 import { pairIdOf } from '../lib/pair'
 import { hereOf } from '../lib/returnTo'
 import { acceptConnection, blockConnection, blockPerson, removeConnection, requestConnection } from '../lib/social'
+import { tieSaid, type TieChange } from '../lib/tieSaid'
 import type { Connection, Group, Profile } from '../lib/types'
 import { focusOnClose, lastChoice, openerOf, revealSheet } from './sheetReveal'
 
@@ -23,6 +25,8 @@ interface PersonSheetProps {
 export const PersonSheet = ({ person, me, verified, connection, groups, onClose }: PersonSheetProps) => {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // What the last change did, for screen readers: the row shows it to everyone else
+  const [said, setSaid] = useState('')
   const sheet = useRef<HTMLElement>(null)
   const pairId = pairIdOf(me, person.id)
   const isMe = person.id === me
@@ -52,11 +56,18 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
     onClose()
   }
 
-  const run = (action: () => Promise<unknown>) => async () => {
+  // Only a first click (or a key) acts: each change swaps the row's buttons at once, and Block or
+  // Reach out slides under the second click of a double-click. The button pressed goes with the
+  // change, so focus moves first, to the sheet
+  const run = (change: TieChange, action: () => Promise<unknown>) => async (e: { detail: number }) => {
+    if (!isFirstClick(e.detail)) return
     setBusy(true)
     setError(null)
+    setSaid('')
+    sheet.current?.focus({ preventScroll: true })
     try {
       await action()
+      setSaid(tieSaid(change, person.penName))
     } catch (e) {
       setError(describeError(e))
     } finally {
@@ -104,7 +115,7 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
         <div className="row">
           {!connection &&
             (verified ? (
-              <button type="button" className="act act--wash" disabled={busy} onClick={run(() => requestConnection(me, person.id))}>
+              <button type="button" className="act act--wash" disabled={busy} onClick={run('request', () => requestConnection(me, person.id))}>
                 Reach out
               </button>
             ) : (
@@ -116,7 +127,7 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
           {status === 'pending' && iAsked && (
             <>
               <span className="pencil">Request sent.</span>
-              <button type="button" className="link-btn" disabled={busy} onClick={run(() => removeConnection(pairId))}>
+              <button type="button" className="link-btn" disabled={busy} onClick={run('cancel', () => removeConnection(pairId))}>
                 Cancel
               </button>
             </>
@@ -125,7 +136,7 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
           {status === 'pending' && !iAsked && (
             <>
               {verified ? (
-                <button type="button" className="act act--wash" disabled={busy} onClick={run(() => acceptConnection(pairId))}>
+                <button type="button" className="act act--wash" disabled={busy} onClick={run('accept', () => acceptConnection(pairId))}>
                   Accept
                 </button>
               ) : (
@@ -133,7 +144,7 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
                   <Link to="/verify" state={{ from: hereOf(location) }}>Confirm your email</Link> to accept.
                 </span>
               )}
-              <button type="button" className="act" disabled={busy} onClick={run(() => removeConnection(pairId))}>
+              <button type="button" className="act" disabled={busy} onClick={run('decline', () => removeConnection(pairId))}>
                 Not now
               </button>
             </>
@@ -144,7 +155,7 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
               <Link to={`/messages/${pairId}`} className="act act--wash">
                 Write privately
               </Link>
-              <button type="button" className="link-btn" disabled={busy} onClick={run(() => removeConnection(pairId))}>
+              <button type="button" className="link-btn" disabled={busy} onClick={run('disconnect', () => removeConnection(pairId))}>
                 Disconnect
               </button>
             </>
@@ -153,20 +164,24 @@ export const PersonSheet = ({ person, me, verified, connection, groups, onClose 
           {blockedByMe && (
             <>
               <span className="pencil">You blocked this person.</span>
-              <button type="button" className="link-btn" disabled={busy} onClick={run(() => removeConnection(pairId))}>
+              <button type="button" className="link-btn" disabled={busy} onClick={run('unblock', () => removeConnection(pairId))}>
                 Unblock
               </button>
             </>
           )}
 
           {blockBy && (
-            <button type="button" className="link-btn" disabled={busy} onClick={run(block)}>
+            <button type="button" className="link-btn" disabled={busy} onClick={run('block', block)}>
               Block
             </button>
           )}
         </div>
       )}
 
+      {/* Mounted with the sheet, so screen readers announce what a change did when it lands */}
+      <p className="visually-hidden" role="status">
+        {said}
+      </p>
       {error && (
         <p className="error" role="alert">
           {error}

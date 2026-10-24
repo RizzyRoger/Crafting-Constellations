@@ -1,5 +1,6 @@
 import { collection, collectionGroup, doc, limit, orderBy, query, updateDoc, where, writeBatch, type Timestamp } from 'firebase/firestore'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { CrisisCard } from '../components/CrisisCard'
@@ -8,6 +9,7 @@ import { PageHead } from '../components/PageHead'
 import { Who } from '../components/Who'
 import { describeError } from '../lib/callables'
 import { db } from '../lib/firebase'
+import { focusForNow } from '../lib/focusForNow'
 import { isFirstClick } from '../lib/groupStanding'
 import { useQueryData } from '../lib/live'
 import { inBatches, withUnseen } from '../lib/noticeList'
@@ -16,6 +18,7 @@ import { otherInPair } from '../lib/pair'
 import { visibleById, waitingOn } from '../lib/people'
 import { hereOf } from '../lib/returnTo'
 import { acceptConnection, removeConnection } from '../lib/social'
+import { tieSaid } from '../lib/tieSaid'
 import { ago } from '../lib/time'
 import type { Chat, Connection, Content, Group, Notice, Profile } from '../lib/types'
 
@@ -132,6 +135,9 @@ export const Notifications = () => {
   const verified = claims.emailVerified
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // What the last answer did. Its button went with it, so focus comes here
+  const [said, setSaid] = useState('')
+  const status = useRef<HTMLParagraphElement>(null)
 
   const notices = useQueryData<Notice>(`notices|${uid}`, () =>
     query(collection(db, `users/${uid}/notices`), orderBy('createdAt', 'desc'), limit(PAGE)),
@@ -146,7 +152,12 @@ export const Notifications = () => {
   const people = useQueryData<Profile>('people', () => collection(db, 'users'))
   const groups = useQueryData<Group>('groups', () => collection(db, 'groups'))
   const chats = useQueryData<Chat>(verified ? `chats|${uid}` : null, () => query(collection(db, 'chats'), where('uids', 'array-contains', uid)))
-  const memberships = useQueryData<{ path: string }>(`my-members|${uid}`, () => query(collectionGroup(db, 'members'), where('uid', '==', uid)))
+  // Each says whether the server has it yet: the shell joins Daily check-in with a local write
+  const memberships = useQueryData<{ path: string; pending?: boolean }>(
+    `my-members|${uid}`,
+    () => query(collectionGroup(db, 'members'), where('uid', '==', uid)),
+    { pending: true },
+  )
 
   const byId = visibleById(people.data)
   const groupNames = new Map(groups.data.map((g) => [g.id, g.name]))
@@ -155,7 +166,9 @@ export const Notifications = () => {
   const listed = withUnseen(notices.data, unseen.data, PAGE)
   const loading = notices.loading || unseen.loading || connections.loading
 
-  const myGroupIds = new Set(memberships.data.map((m) => m.path.split('/')[1]))
+  const groupOf = (m: { path: string }) => m.path.split('/')[1]
+  const myGroupIds = new Set(memberships.data.filter((m) => !m.pending).map(groupOf))
+  const joining = new Set(memberships.data.filter((m) => m.pending).map(groupOf))
 
   const placeName = (notice: Notice) => {
     const place = placeOf(notice.contentPath)
@@ -163,22 +176,29 @@ export const Notifications = () => {
     return place.kind === 'chatMessage' ? chatNames.get(place.chatId) : groupNames.get(place.groupId)
   }
 
-  // Only read what the rules will allow; private chats need a confirmed email to read at all
+  // Only read what the rules will allow; private chats need a confirmed email to read at all.
+  // A group I'm joining isn't known until the server has me: a listen it judged first is refused
   const readable = (notice: Notice) => {
     const place = placeOf(notice.contentPath)
     if (!place) return undefined
     if (place.kind === 'chatMessage') return verified && !chats.loading ? chatNames.has(place.chatId) : undefined
-    return memberships.loading ? undefined : myGroupIds.has(place.groupId)
+    return memberships.loading || joining.has(place.groupId) ? undefined : myGroupIds.has(place.groupId)
   }
 
   // Only a first click (or a key) acts. Answering a request drops its row at once, and the next
-  // one slides up under the second click of a double-click
-  const run = (id: string, work: () => Promise<unknown>) => async (e: { detail: number }) => {
+  // one slides up under the second click of a double-click. The row takes the focused button with
+  // it (Mark all read goes once nothing's unseen), so focus moves first, to where it's said. A click
+  // leaves the page where it is, since the change shows there; a key brings focus into view
+  const run = (id: string, work: () => Promise<unknown>, words: string) => async (e: { detail: number }) => {
     if (!isFirstClick(e.detail)) return
     setBusy(id)
     setError(null)
+    // Emptied on the page before focus comes, or the last answer's words are read out for this one
+    flushSync(() => setSaid(''))
+    if (status.current) focusForNow(status.current, { preventScroll: e.detail > 0 })
     try {
       await work()
+      setSaid(words)
     } catch (e) {
       setError(describeError(e))
     } finally {
@@ -204,6 +224,10 @@ export const Notifications = () => {
         seed={47}
       />
 
+      {/* Mounted from the start, so screen readers announce what an answer did when it lands */}
+      <p ref={status} className="meta live" role="status">
+        {said}
+      </p>
       {error && (
         <p className="error" role="alert">
           {error}
@@ -224,7 +248,12 @@ export const Notifications = () => {
                   <span className="row">
                     <span className="meta">wants to connect</span>
                     {verified ? (
-                      <button type="button" className="act act--quiet act--wash" disabled={busy === c.id} onClick={run(c.id, () => acceptConnection(c.id))}>
+                      <button
+                        type="button"
+                        className="act act--quiet act--wash"
+                        disabled={busy === c.id}
+                        onClick={run(c.id, () => acceptConnection(c.id), tieSaid('accept', person?.penName))}
+                      >
                         Accept
                       </button>
                     ) : (
@@ -232,7 +261,12 @@ export const Notifications = () => {
                         <Link to="/verify" state={{ from: hereOf(location) }}>Confirm your email</Link> to accept.
                       </span>
                     )}
-                    <button type="button" className="link-btn" disabled={busy === c.id} onClick={run(c.id, () => removeConnection(c.id))}>
+                    <button
+                      type="button"
+                      className="link-btn"
+                      disabled={busy === c.id}
+                      onClick={run(c.id, () => removeConnection(c.id), tieSaid('decline', person?.penName))}
+                    >
                       Not now
                     </button>
                   </span>
@@ -247,7 +281,7 @@ export const Notifications = () => {
         <div className="section__head">
           <h2 id="latest">Latest</h2>
           {unseen.data.length > 0 && (
-            <button type="button" className="link-btn" disabled={busy === 'all'} onClick={run('all', markAllRead)}>
+            <button type="button" className="link-btn" disabled={busy === 'all'} onClick={run('all', markAllRead, 'All marked read.')}>
               Mark all read
             </button>
           )}

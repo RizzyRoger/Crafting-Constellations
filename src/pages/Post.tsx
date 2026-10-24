@@ -7,6 +7,7 @@ import { Item } from '../components/Item'
 import { LikeButton } from '../components/LikeButton'
 import { MentionText } from '../components/MentionText'
 import { Quiet } from '../components/Quiet'
+import { Said, useSaid } from '../components/Said'
 import { db } from '../lib/firebase'
 import { useDocData, useLiveContent, useQueryData } from '../lib/live'
 import { findById, mineFrom, publishedFrom } from '../lib/lookup'
@@ -34,6 +35,7 @@ export const PostPage = () => {
   const gone = post?.status === 'withdrawn' || post?.status === 'removed'
   const comments = useLiveContent<Comment>(post && !gone ? `${path}/comments` : null, uid, { direction: 'asc', max: 100 })
   const people = useGroupPeople(member ? groupId : null, uid)
+  const [said, say] = useSaid(path)
 
   if (!valid) return <Quiet>This post isn’t available.</Quiet>
   if (membership.loading || published.loading || mine.loading) return <Quiet>Opening the post…</Quiet>
@@ -51,14 +53,21 @@ export const PostPage = () => {
       </Quiet>
     )
   }
+
+  // Withdrawing the post swaps the page for this note, whose region arrives already holding its
+  // words, so it's often not read. The page's own status keeps its place in both, and says it
+  const status = <Said said={said} />
   if (gone) {
     return (
-      <Quiet>
-        {post.status === 'withdrawn'
-          ? 'You withdrew this post.'
-          : 'A moderator removed this post, because it didn’t fit the group’s guidelines.'}{' '}
-        <Link to={`/groups/${groupId}`}>Back to the group</Link>
-      </Quiet>
+      <>
+        {status}
+        <Quiet>
+          {post.status === 'withdrawn'
+            ? 'You withdrew this post.'
+            : 'A moderator removed this post, because it didn’t fit the group’s guidelines.'}{' '}
+          <Link to={`/groups/${groupId}`}>Back to the group</Link>
+        </Quiet>
+      </>
     )
   }
 
@@ -73,54 +82,58 @@ export const PostPage = () => {
   }
 
   return (
-    <div className="stack reading" style={{ gap: 28 }}>
-      <Link to={`/groups/${groupId}?tab=posts`} className="code">
-        ← {group.data?.name ?? 'Group'}
-      </Link>
+    <>
+      {status}
+      <div className="stack reading" style={{ gap: 28 }}>
+        <Link to={`/groups/${groupId}?tab=posts`} className="code">
+          ← {group.data?.name ?? 'Group'}
+        </Link>
 
-      <Item
-        item={post}
-        me={uid}
-        blotSize={32}
-        variant="card"
-        actions={
-          post.status === 'published' && claims.emailVerified && (
-            <>
-              <LikeButton postPath={path} me={uid} count={post.likeCount} />
-              <span className="mark" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="22" height="22">
-                  <path d="M5 6.5h14v9H8l-3 3v-12z" />
-                </svg>
-              </span>
-            </>
-          )
-        }
-      >
-        {post.title && <h1 className="post__title" style={{ fontSize: 30 }}>{post.title}</h1>}
-        <MentionText text={post.body} mentioned={post.mentioned} me={uid} />
-      </Item>
+        <Item
+          item={post}
+          me={uid}
+          blotSize={32}
+          variant="card"
+          say={say}
+          actions={
+            post.status === 'published' && claims.emailVerified && (
+              <>
+                <LikeButton postPath={path} me={uid} count={post.likeCount} />
+                <span className="mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="22" height="22">
+                    <path d="M5 6.5h14v9H8l-3 3v-12z" />
+                  </svg>
+                </span>
+              </>
+            )
+          }
+        >
+          {post.title && <h1 className="post__title" style={{ fontSize: 30 }}>{post.title}</h1>}
+          <MentionText text={post.body} mentioned={post.mentioned} me={uid} />
+        </Item>
 
-      <section className="section comment-break" aria-labelledby="comments">
-        <div className="section__head">
-          <h2 id="comments">Comments</h2>
-        </div>
-        {comments.data.length === 0 && !comments.loading && <p className="empty">No comments yet.</p>}
-        <ul className="post-list">
-          {comments.data.map((c) => (
-            <li key={c.id}>
-              <Item item={c} me={uid} blotSize={36} variant="comment">
-                <MentionText text={c.text} mentioned={c.mentioned} me={uid} />
-              </Item>
-            </li>
-          ))}
-        </ul>
-        {post.status === 'published' &&
-          (claims.emailVerified ? (
-            <Composer shape="bar" label="Comment" submitLabel="Send" rows={1} people={people} onSubmit={reply} />
-          ) : (
-            <ConfirmEmail />
-          ))}
-      </section>
-    </div>
+        <section className="section comment-break" aria-labelledby="comments">
+          <div className="section__head">
+            <h2 id="comments">Comments</h2>
+          </div>
+          {comments.data.length === 0 && !comments.loading && <p className="empty">No comments yet.</p>}
+          <ul className="post-list">
+            {comments.data.map((c) => (
+              <li key={c.id}>
+                <Item item={c} me={uid} blotSize={36} variant="comment" say={say}>
+                  <MentionText text={c.text} mentioned={c.mentioned} me={uid} />
+                </Item>
+              </li>
+            ))}
+          </ul>
+          {post.status === 'published' &&
+            (claims.emailVerified ? (
+              <Composer shape="bar" label="Comment" submitLabel="Send" rows={1} people={people} onSubmit={reply} />
+            ) : (
+              <ConfirmEmail />
+            ))}
+        </section>
+      </div>
+    </>
   )
 }

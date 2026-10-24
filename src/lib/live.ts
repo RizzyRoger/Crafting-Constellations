@@ -71,8 +71,12 @@ export const useDocData = <T>(path: string | null): LiveDoc<T> => {
   return state.key === path ? state : { data: null, loading: Boolean(path), error: null, pending: false }
 }
 
+// A row, and with `pending` whether it's still only a local write the server hasn't confirmed
+const rowOf = <T>(snap: QueryDocumentSnapshot, pending: boolean) =>
+  pending ? ({ ...withId<object>(snap), pending: snap.metadata.hasPendingWrites } as T) : withId<T>(snap)
+
 // One query's latest rows, with the key they answered
-const useRows = <T>(key: string | null, build: () => Query) => {
+const useRows = <T>(key: string | null, build: () => Query, pending = false) => {
   const [state, setState] = useState<Answered<LiveRows<T>>>({ key: null, data: [], loading: false, error: null, synced: false })
 
   useEffect(() => {
@@ -88,19 +92,20 @@ const useRows = <T>(key: string | null, build: () => Query) => {
       // Metadata too, only to hear the server answer after the cache did
       { includeMetadataChanges: true },
       (snap) => {
-        const changed = !answered || snap.docChanges().length > 0
+        // Marking pending rows, the server confirming one is a change even when its data isn't
+        const changed = !answered || snap.docChanges({ includeMetadataChanges: pending }).length > 0
         const heard = synced || !snap.metadata.fromCache
         // Only metadata, and not the server's first answer: nothing to show
         if (!changed && heard === synced) return
         answered = true
         synced = heard
-        if (changed) setState({ key, data: snap.docs.map((d) => withId<T>(d)), loading: false, error: null, synced: heard })
+        if (changed) setState({ key, data: snap.docs.map((d) => rowOf<T>(d, pending)), loading: false, error: null, synced: heard })
         // The same rows, so nothing built from them changes
         else setState((last) => ({ ...last, synced: heard }))
       },
       (error) => setState({ key, data: [], loading: false, error, synced: true }),
     )
-    // build is derived from key by the caller
+    // build is derived from key by the caller, and pending is fixed where it's called
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
@@ -111,9 +116,11 @@ const useRows = <T>(key: string | null, build: () => Query) => {
 const current = <T>(state: Answered<LiveRows<T>>, key: string | null): LiveRows<T> =>
   state.key === key ? state : { data: NONE, loading: Boolean(key), error: null, synced: false }
 
-// One live query; `key` must change whenever the query changes
-export const useQueryData = <T>(key: string | null, build: () => Query): Live<T[]> => {
-  const state = useRows<T>(key, build)
+// One live query; `key` must change whenever the query changes. Asked to, each row also says
+// whether it's only a local write so far (`pending`): a member-only listen waits until the server
+// has the membership, or the rules refuse it (tasks/lessons.md)
+export const useQueryData = <T>(key: string | null, build: () => Query, { pending = false } = {}): Live<T[]> => {
+  const state = useRows<T>(key, build, pending)
   // A new key says loading at once but keeps the last rows until its own come, so search
   // results don't blank between keystrokes. Read them as this key's only once loaded
   if (key && state.key !== key) return { data: state.data, loading: true, error: null }

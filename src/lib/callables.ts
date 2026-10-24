@@ -109,6 +109,8 @@ export const describeError = (error: unknown): string => {
     'auth/user-not-found': 'That email and password don’t match.',
     'auth/invalid-email': 'That doesn’t look like an email address.',
     'auth/email-already-in-use': 'There’s already an account with that email. Try signing in.',
+    // Google on an email that already signs in with a password (the only other way in): Auth refuses it every time
+    'auth/account-exists-with-different-credential': 'There’s already an account with that email. Sign in with your email and password.',
     'auth/weak-password': 'Use at least 8 characters.',
     'auth/too-many-requests': 'Too many tries. Wait a minute, then try again.',
     'auth/popup-closed-by-user': 'The sign-in window was closed.',
@@ -140,3 +142,11 @@ export const describeError = (error: unknown): string => {
   }
   return map[error.code] ?? 'Something went wrong. Try again in a moment.'
 }
+
+// Forgot password says why only for answers that are the same whether or not the email has an
+// account: the request never left, the address is malformed, too many tries. Anything else (no
+// such account, a paused one, a send that failed once the account was found) returns null, for
+// the same note as a sent link, so the page never tells anyone which emails have accounts
+const RESET_REFUSALS = new Set(['auth/network-request-failed', 'auth/invalid-email', 'auth/too-many-requests'])
+export const resetRefusal = (error: unknown): string | null =>
+  error instanceof FirebaseError && RESET_REFUSALS.has(error.code) ? describeError(error) : null

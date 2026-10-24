@@ -44,3 +44,12 @@ export const click = (gesture: Gesture, uid: string): { gesture: Gesture; opens:
 
 // While a dot is pressed, a finger's moves belong to the dot, so the page must not pan under them
 export const holdsPage = (gesture: Gesture) => gesture.press !== null
+
+// The dot pressed or held has left the chart (that friendship ended, say). The pointer's lift
+// can't reach a dot that's gone, so the press and the hold end here, as a lift would end them.
+// Otherwise the page stays held still under a finger and a drag keeps stepping
+export const forgetGone = <H extends { uid: string }>(gesture: Gesture, hold: H | null, onChart: (uid: string) => boolean) => {
+  const pressGone = gesture.press !== null && !onChart(gesture.press.uid)
+  const holdGone = hold !== null && !onChart(hold.uid)
+  return { gesture: pressGone ? lift(gesture) : gesture, hold: pressGone || holdGone ? null : hold }
+}

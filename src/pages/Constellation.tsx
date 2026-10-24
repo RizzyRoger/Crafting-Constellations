@@ -1,5 +1,5 @@
 import { collection, collectionGroup, orderBy, query, where } from 'firebase/firestore'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { Quiet } from '../components/Quiet'
@@ -8,7 +8,7 @@ import { ConstellationMap } from '../constellation/ConstellationMap'
 import { EgoMap } from '../constellation/EgoMap'
 import { chartIsEmpty, type EgoTie } from '../constellation/egoLayout'
 import { PersonSheet } from '../constellation/PersonSheet'
-import { CHOOSE } from '../constellation/sheetReveal'
+import { CHOOSE, sheetMayOpen } from '../constellation/sheetReveal'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import { waitingOn, withVisible } from '../lib/people'
@@ -104,6 +104,12 @@ export const Constellation = () => {
   const waiting = useMemo(() => incoming.map((c) => c.requester), [incoming])
   const loading = constellations.loading || groups.loading || people.loading || friendships.loading || connections.loading
 
+  // A sheet that comes up with the page waits for the groups chart to have its height (sheetReveal)
+  const [groupsLaidOut, setGroupsLaidOut] = useState(false)
+  const [sheetMay, setSheetMay] = useState(false)
+  const mayOpen = sheetMayOpen(sheetMay, { loading, view, chartLaidOut: groupsLaidOut })
+  if (mayOpen !== sheetMay) setSheetMay(mayOpen)
+
   return (
     <>
       <h1 className="visually-hidden">Your constellation</h1>
@@ -128,9 +134,9 @@ export const Constellation = () => {
       {loading ? (
         <Quiet>Laying out the chart…</Quiet>
       ) : (
-        // Focusable from script, so closing a sheet that nothing on the chart opened (the rail
-        // search did) leaves focus here rather than at the top of the page
-        <div className="constellation" tabIndex={-1}>
+        // Not focusable, so a click on its text keeps Tab where the click was. A sheet closing with
+        // nothing on the chart to go back to (the rail search chose them) focuses it for that move only
+        <div className="constellation">
           {view === 'friends' ? (
             alone ? (
               <ChartWelcome
@@ -166,6 +172,7 @@ export const Constellation = () => {
               myGroupIds={myGroupIds}
               selected={selected}
               onSelect={selectPerson}
+              onLaidOut={setGroupsLaidOut}
             />
           ) : (
             <ConstellationList
@@ -183,7 +190,7 @@ export const Constellation = () => {
             />
           )}
 
-          {person && (
+          {person && mayOpen && (
             <PersonSheet
               key={person.id}
               person={person}

@@ -68,11 +68,15 @@ p {
 
 /* ---------- app shell: page + annotation rail ---------- */
 
+/* dvh, where there is one: on phones 100vh is the height with the toolbars hidden, so while they
+   show, the bottom of the shell (a send bar) sat under Safari's bar or below Chrome's screen */
 .shell {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
   height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
+  min-height: 100dvh;
   max-width: none;
   margin: 0;
 }
@@ -95,6 +99,8 @@ p {
   outline: none;
 }
 
+/* As tall as the shell, so the lists scroll and the foot stays in view. With only a min-height it
+   took the lists' height, ran past a short window with Sign out under it, and the window scrolled */
 .rail {
   position: sticky;
   top: 0;
@@ -102,7 +108,8 @@ p {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   padding: 22px 16px 28px;
   border-right: 1px solid var(--ink);
   background: var(--paper);
@@ -194,6 +201,11 @@ p {
   padding: 4px 0 4px 12px;
   display: grid;
   gap: 4px;
+}
+
+/* A moderator's note may carry a link, one long word that widened the page past a phone */
+.banner .note {
+  overflow-wrap: anywhere;
 }
 
 /* ---------- page head: one wash per viewport, title orbits it ---------- */
@@ -591,6 +603,7 @@ p {
   color: var(--ink);
 }
 
+/* A refusal may name a file, and a file name can be one long underscore-joined word */
 .error {
   font-family: var(--font-code);
   font-size: 13px;
@@ -598,6 +611,7 @@ p {
   color: #4a2f2a;
   border-left: 2px solid #4a2f2a;
   padding-left: 10px;
+  overflow-wrap: anywhere;
 }
 
 /* ---------- forms ---------- */
@@ -653,8 +667,10 @@ p {
   outline-offset: 4px;
 }
 
+/* Names the files chosen, which can be one long word */
 .field .hint {
   margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 
 .pigments {
@@ -724,6 +740,12 @@ p {
 .act--quiet {
   font-size: 16px;
   padding: 2px 10px 3px;
+}
+
+/* The wash fades to paper over its last 20%, and its right padding keeps the label out of that.
+   The quiet 10px put the end of 'Count my visits' at 92%, about 1.7:1; 32px keeps 118px of label clear */
+.act--quiet.act--wash {
+  padding-right: 32px;
 }
 
 .or {
@@ -836,6 +858,7 @@ p {
      got what it left: 14px at 375x667, none in landscape, and a longer foot lost Sign out too */
   .rail {
     position: static;
+    height: auto;
     min-height: 0;
     max-height: 38vh;
     overflow: auto;
@@ -1503,6 +1526,8 @@ p {
   gap: 2px;
 }
 
+/* A pen name or a chat's name can be one 32-letter word, wider than the rail's lists. It pushed their
+   column wider, and the lists and their headings scrolled sideways under a name cut off mid-word */
 .disc__list a,
 .disc__list button,
 .disc__empty {
@@ -1515,6 +1540,7 @@ p {
   padding: 4px 0;
   text-align: left;
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
 .disc__empty {
@@ -2060,6 +2086,11 @@ a.disc__empty:hover {
 .notice {
   display: grid;
   gap: 6px;
+}
+
+/* A moderator's note may carry a link, one long word that widened the page past a phone */
+.notice .meta {
+  overflow-wrap: anywhere;
 }
 
 .notice__open {

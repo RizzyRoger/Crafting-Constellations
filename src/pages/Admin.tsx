@@ -1,6 +1,6 @@
 import { collection, limit, orderBy, query, where } from 'firebase/firestore'
 import { getBlob, ref } from 'firebase/storage'
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState, type RefObject } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { refusedAsModerator } from '../auth/moderator'
@@ -8,11 +8,13 @@ import { PageHead } from '../components/PageHead'
 import { Who } from '../components/Who'
 import { approveContent, banUser, describeError, problemOf, removeContent, reviewProfessional, setAdmin, unbanUser, type ModOutcome } from '../lib/callables'
 import { db, storage } from '../lib/firebase'
+import { focusForNow } from '../lib/focusForNow'
 import { useQueryData } from '../lib/live'
 import { openInNewTab } from '../lib/newTab'
 import { penNameSearchTerm } from '../lib/penNameSearch'
 import { readsReports, reportDetails } from '../lib/reportDetails'
 import { outcomeNote } from '../lib/reviewOutcome'
+import { banSaid, focusLost, licenceSaid, type Licence } from '../lib/reviewResult'
 import { roleFocus, type RoleChange } from '../lib/roleQuestion'
 import { ago } from '../lib/time'
 import type { FiledReport, ProApplication, Profile, QueueItem } from '../lib/types'
@@ -199,8 +201,36 @@ const useDocuments = (uid: string) => {
   return { busy, error, tried, held, open }
 }
 
-const Application = ({ app, person }: { app: ProApplication & { id: string }; person?: Profile }) => {
+// Where a licence decision is said, above both lists: the row it was made in leaves its list
+type Teller = { say: (words: string) => void; status: RefObject<HTMLElement | null> }
+
+const useDecision = (uid: string, who: string, { say, status }: Teller) => {
   const { busy, error, run } = useAction()
+  // A decision is under way or made here, so the row leaving is this moderator's doing
+  const deciding = useRef(false)
+  // Leaving, the row takes the focused button with it, so focus goes to where the result is said
+  useEffect(
+    () => () => {
+      if (deciding.current && focusLost(document) && status.current) focusForNow(status.current)
+    },
+    [status],
+  )
+  const decide = (request: { decision: Licence; note?: string }) =>
+    run(async () => {
+      say('')
+      deciding.current = true
+      // An older backend leaves outcome out
+      const done: { ok: true; outcome?: ModOutcome } = await reviewProfessional({ uid, ...request }).catch((e) => {
+        deciding.current = false
+        throw e
+      })
+      say(licenceSaid(who, request.decision, done.outcome))
+    })
+  return { busy, error, decide }
+}
+
+const Application = ({ app, person, teller }: { app: ProApplication & { id: string }; person?: Profile; teller: Teller }) => {
+  const { busy, error, decide } = useDecision(app.uid, person?.penName ?? app.uid, teller)
   const docs = useDocuments(app.uid)
   const [note, setNote] = useState('')
   return (
@@ -244,11 +274,11 @@ const Application = ({ app, person }: { app: ProApplication & { id: string }; pe
         </p>
       )}
       <div className="row">
-        <button type="button" className="act act--quiet act--wash" disabled={busy} onClick={run(() => reviewProfessional({ uid: app.uid, decision: 'approve', note }))}>
+        <button type="button" className="act act--quiet act--wash" disabled={busy} onClick={decide({ decision: 'approve', note })}>
           Approve licence
         </button>
         <input aria-label="Note to the applicant (optional)" placeholder="note (optional)" value={note} onChange={(e) => setNote(e.target.value)} className="admin-note" />
-        <button type="button" className="act act--quiet" disabled={busy} onClick={run(() => reviewProfessional({ uid: app.uid, decision: 'deny', note }))}>
+        <button type="button" className="act act--quiet" disabled={busy} onClick={decide({ decision: 'deny', note })}>
           Deny
         </button>
       </div>
@@ -261,13 +291,13 @@ const Application = ({ app, person }: { app: ProApplication & { id: string }; pe
   )
 }
 
-const LicensedPro = ({ pro }: { pro: Profile }) => {
-  const { busy, error, run } = useAction()
+const LicensedPro = ({ pro, teller }: { pro: Profile; teller: Teller }) => {
+  const { busy, error, decide } = useDecision(pro.id, pro.penName, teller)
   return (
     <li className="stack" style={{ gap: 8 }}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <Who person={{ ...pro, avatarSeed: pro.avatarSeed || pro.id }} />
-        <button type="button" className="link-btn" disabled={busy} onClick={run(() => reviewProfessional({ uid: pro.id, decision: 'revoke' }))}>
+        <button type="button" className="link-btn" disabled={busy} onClick={decide({ decision: 'revoke' })}>
           Revoke mark
         </button>
       </div>
@@ -285,28 +315,48 @@ const Pros = () => {
     query(collection(db, 'proApplications'), where('status', '==', 'submitted'), orderBy('submittedAt', 'asc')),
   )
   const pros = useQueryData<Profile>('admin-pros', () => query(collection(db, 'users'), where('pro', '==', true)))
+  // Unread, names fall back to the uid
   const people = useQueryData<Profile>('people', () => collection(db, 'users'))
   const byId = new Map(people.data.map((p) => [p.id, p]))
+  // What came of the last decision, naming who it was about
+  const [said, setSaid] = useState('')
+  const status = useRef<HTMLParagraphElement>(null)
+  const teller: Teller = { say: setSaid, status }
 
   return (
     <div className="stack" style={{ gap: 32 }}>
-      {apps.data.length === 0 ? (
+      {/* Mounted from the start, so screen readers announce what a decision did when it lands */}
+      <p ref={status} className="meta live" role="status">
+        {said}
+      </p>
+      {/* A refused or unanswered listen has no rows either, and isn't nobody waiting */}
+      {apps.error ? (
+        <p className="error" role="alert">
+          Couldn’t read the applications. {describeError(apps.error)}
+        </p>
+      ) : !apps.loading && apps.data.length === 0 ? (
         <p className="empty">No applications waiting.</p>
       ) : (
         <ul className="ruled-list">
           {apps.data.map((app) => (
-            <Application key={app.id} app={app} person={byId.get(app.uid)} />
+            <Application key={app.id} app={app} person={byId.get(app.uid)} teller={teller} />
           ))}
         </ul>
       )}
-      {pros.data.length > 0 && (
+      {(pros.error || pros.data.length > 0) && (
         <section className="stack">
           <span className="code">Licensed now</span>
-          <ul className="ruled-list">
-            {pros.data.map((p) => (
-              <LicensedPro key={p.id} pro={p} />
-            ))}
-          </ul>
+          {pros.error ? (
+            <p className="error" role="alert">
+              Couldn’t read who’s licensed. {describeError(pros.error)}
+            </p>
+          ) : (
+            <ul className="ruled-list">
+              {pros.data.map((p) => (
+                <LicensedPro key={p.id} pro={p} teller={teller} />
+              ))}
+            </ul>
+          )}
         </section>
       )}
     </div>
@@ -337,8 +387,11 @@ const PersonAdmin = ({ person, me }: { person: Profile; me: string }) => {
   const question = useRef<HTMLSpanElement>(null)
   const make = useRef<HTMLButtonElement>(null)
   const remove = useRef<HTMLButtonElement>(null)
+  const standing = useRef<HTMLSpanElement>(null)
   // The change last asked about, so focus can go back to its button
   const asked = useRef<RoleChange | null>(null)
+  // A ban (true) or its lifting (false) asked for here, until the row shows it
+  const banning = useRef<boolean | null>(null)
   useEffect(() => {
     const to = roleFocus(asking, asked.current)
     asked.current = asking
@@ -346,6 +399,14 @@ const PersonAdmin = ({ person, me }: { person: Profile; me: string }) => {
     const target = { question, make, remove }[to]
     target.current?.focus()
   }, [asking])
+  // Ban and Lift ban swap places once the row shows the change, taking focus with the one pressed.
+  // It comes to the row's word for where they stand, read out new, never to the button beside it,
+  // which would undo it at the next Enter
+  useEffect(() => {
+    if (banning.current !== Boolean(person.banned)) return
+    banning.current = null
+    if (focusLost(document) && standing.current) focusForNow(standing.current)
+  }, [person.banned])
   const ask = (change: RoleChange) => () => {
     setAsking(change)
     setSaid(null)
@@ -356,16 +417,26 @@ const PersonAdmin = ({ person, me }: { person: Profile; me: string }) => {
       setAsking(null)
       setSaid(was === (change === 'make') ? ROLE[change].already : ROLE[change].done)
     })
+  const setBan = (ban: boolean) =>
+    run(async () => {
+      setSaid(null)
+      banning.current = ban
+      await (ban ? banUser({ uid: person.id, reason: reason.trim(), hideContent: hide }) : unbanUser({ uid: person.id })).catch((e) => {
+        banning.current = null
+        throw e
+      })
+      setSaid(banSaid(ban, ban && hide))
+    })
   return (
     <li className="stack" style={{ gap: 8 }}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <Who person={{ ...person, avatarSeed: person.avatarSeed || person.id }} />
-        <span className="meta">{person.banned ? 'banned' : 'active'}</span>
+        <span ref={standing} className="meta">{person.banned ? 'banned' : 'active'}</span>
       </div>
       {person.id !== me &&
         (person.banned ? (
           <div className="row">
-            <button type="button" className="act act--quiet" disabled={busy} onClick={run(() => unbanUser({ uid: person.id }))}>
+            <button type="button" className="act act--quiet" disabled={busy} onClick={setBan(false)}>
               Lift ban
             </button>
           </div>
@@ -376,12 +447,7 @@ const PersonAdmin = ({ person, me }: { person: Profile; me: string }) => {
               <label className="code row" style={{ gap: 6 }}>
                 <input type="checkbox" checked={hide} onChange={(e) => setHide(e.target.checked)} /> hide their writing
               </label>
-              <button
-                type="button"
-                className="act act--quiet"
-                disabled={busy || reason.trim().length < 3}
-                onClick={run(() => banUser({ uid: person.id, reason: reason.trim(), hideContent: hide }))}
-              >
+              <button type="button" className="act act--quiet" disabled={busy || reason.trim().length < 3} onClick={setBan(true)}>
                 Ban
               </button>
             </div>
@@ -408,12 +474,15 @@ const PersonAdmin = ({ person, me }: { person: Profile; me: string }) => {
                 </button>
               </div>
             )}
-            {/* Mounted from the start, so screen readers announce what the change did when it lands */}
-            <p className="meta live" role="status">
-              {said}
-            </p>
           </>
         ))}
+      {/* Mounted from the start, and outside what a ban swaps, so screen readers announce what a
+          change did when it lands */}
+      {person.id !== me && (
+        <p className="meta live" role="status">
+          {said}
+        </p>
+      )}
       {error && (
         <p className="error" role="alert">
           {error}

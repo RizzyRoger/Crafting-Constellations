@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Composer } from './Composer'
 
 // A server render can't type or wait on a send, so Composer runs on a small stand-in for
@@ -64,6 +64,11 @@ const find = (node: ReactNode, type: string): El | null => {
 }
 
 const BEA = { id: 'bea', penName: 'Bea', avatarSeed: 'bea', pigment: 'ochre' }
+const BEA_LIN = { id: 'bea-lin', penName: 'Bea Lin', avatarSeed: 'bea-lin', pigment: 'ochre' }
+
+const rot13 = (s: string) => s.replace(/[a-z]/g, (c) => String.fromCharCode(((c.charCodeAt(0) - 97 + 13) % 26) + 97))
+// Crisis language, from functions' moderation tests
+const CRISIS = rot13('v jnag gb qvr')
 
 // One composer on a page, with a send that waits for the server until the case says it answered
 const open = (props: Partial<Props> = {}) => {
@@ -83,6 +88,23 @@ const open = (props: Partial<Props> = {}) => {
     const handle = field(type)[name] as (e: unknown) => void
     handle(event)
     tree()
+  }
+  // A server render attaches no refs, so the field and Send get stand-in nodes, and the page notes
+  // which of them has focus, starting on `at`
+  const focusOn = (at: 'field' | 'Send') => {
+    const page = { activeElement: null as unknown }
+    const node = (name: string) => {
+      const self = { name, focus: () => void (page.activeElement = self), setSelectionRange: () => {} }
+      return self
+    }
+    const nodes = { field: node('field'), Send: node('Send') }
+    const attachField = field('textarea').ref as (node: unknown) => void
+    attachField(nodes.field)
+    const send = field('button').ref as { current: unknown } | undefined
+    if (send) send.current = nodes.Send
+    page.activeElement = nodes[at]
+    vi.stubGlobal('document', page)
+    return { focused: () => (page.activeElement as { name: string }).name }
   }
   const key = (key: string, mods: { ctrlKey?: boolean } = {}) =>
     on('textarea', 'onKeyDown')({
@@ -104,6 +126,7 @@ const open = (props: Partial<Props> = {}) => {
     type: (value: string) => on('textarea', 'onChange')({ target: { value, selectionStart: value.length } }),
     typeTitle: (value: string) => on('input', 'onChange')({ target: { value } }),
     focus: () => on('textarea', 'onFocus')({}),
+    focusOn,
     key,
     // Ctrl+Enter, so the caret stays in the field
     send: () => key('Enter', { ctrlKey: true }),
@@ -163,6 +186,69 @@ describe('Composer while a message is on its way', () => {
     expect(composer.text()).toBe('')
   })
 
+  it('takes off the words that went and keeps what was typed after them, so they are not sent twice', async () => {
+    const composer = open()
+    composer.type('first message')
+    composer.send()
+    composer.type('first message second')
+    await composer.answer()
+    expect(composer.text()).toBe('second')
+    composer.send()
+    await composer.answer()
+    expect(composer.sent.map(([text]) => text)).toEqual(['first message', 'second'])
+    expect(composer.text()).toBe('')
+  })
+
+  it('keeps the field as it is if the words that went were changed meanwhile', async () => {
+    const composer = open()
+    composer.type('See you at 6')
+    composer.send()
+    composer.type('See you at 7 instead')
+    await composer.answer()
+    expect(composer.text()).toBe('See you at 7 instead')
+  })
+
+  it('lets go of the people picked for the words that went, so the next words don\'t ping them', async () => {
+    const composer = open({ people: [BEA] })
+    composer.type('@Be')
+    composer.key('Enter')
+    composer.type('@Bea are you about tonight?')
+    composer.send()
+    composer.type('@Bea are you about tonight? I can drive')
+    await composer.answer()
+    expect(composer.text()).toBe('I can drive')
+    // Typed by hand, not picked
+    composer.type('I can drive @Bea')
+    composer.send()
+    expect(composer.sent.map(([text, , mentions]) => [text, mentions])).toEqual([
+      ['@Bea are you about tonight?', ['bea']],
+      ['I can drive @Bea', []],
+    ])
+  })
+
+  it('keeps the list closed on a name picked after the words that went', async () => {
+    const composer = open({ people: [BEA, BEA_LIN] })
+    composer.type('first message')
+    composer.send()
+    composer.type('first message @Be')
+    composer.key('Enter')
+    await composer.answer()
+    expect(composer.text()).toBe('@Bea ')
+    expect(composer.html()).not.toContain('mention-list')
+  })
+
+  it('keeps the sheet open with the words typed after a post, and clears its title', async () => {
+    const composer = open({ shape: undefined, expandable: true, withTitle: true })
+    composer.focus()
+    composer.typeTitle('A good day')
+    composer.type('first post')
+    composer.post()
+    composer.type('first post\n\nand a second thought')
+    await composer.answer()
+    expect(composer.text()).toBe('and a second thought')
+    expect(composer.title()).toBe('')
+  })
+
   it('clears the title and closes the sheet once the post is in, if nothing more was typed', async () => {
     const composer = open({ shape: undefined, expandable: true, withTitle: true })
     composer.focus()
@@ -197,6 +283,23 @@ describe('Composer, read aloud', () => {
     expect(hints(composer.html())).toEqual([''])
   })
 
+  // The server holds private crisis writing for a person when anything else was flagged too
+  it('says a private note may wait when crisis language is not all that was flagged', () => {
+    const composer = open({ context: 'private' })
+    composer.type(CRISIS)
+    expect(hints(composer.html())).toEqual([''])
+    composer.type(`${CRISIS} https://example.com/fundraiser`)
+    expect(hints(composer.html())).toEqual([WAIT])
+    composer.type(`${CRISIS} ${'\u{1F62D}'.repeat(20)}`)
+    expect(hints(composer.html())).toEqual([WAIT])
+  })
+
+  it('says crisis writing in a group may wait', () => {
+    const composer = open()
+    composer.type(CRISIS)
+    expect(hints(composer.html())).toEqual([WAIT])
+  })
+
   it('reads out a refused send as an alert, and keeps the words', async () => {
     const composer = open()
     composer.type('are you there?')
@@ -204,5 +307,33 @@ describe('Composer, read aloud', () => {
     await composer.answer(new Error('This conversation is closed.'))
     expect(composer.html()).toMatch(/<p class="error" role="alert">This conversation is closed\.<\/p>/)
     expect(composer.text()).toBe('are you there?')
+  })
+})
+
+// Enter in the field starts a new line, so a keyboard user sends with Tab to Send, then Enter
+describe('Composer, sent with the Send button', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('hands focus to the field: Send is disabled while the words are on their way and once they have gone', async () => {
+    const composer = open()
+    composer.type('see you at six')
+    const page = composer.focusOn('Send')
+    composer.post()
+    expect(composer.button()).toMatchObject({ children: 'Sending…', disabled: true })
+    expect(page.focused()).toBe('field')
+    await composer.answer()
+    expect(composer.button().disabled).toBe(true)
+    expect(page.focused()).toBe('field')
+  })
+
+  it('leaves focus in the field when the words go with Ctrl+Enter', async () => {
+    const composer = open()
+    composer.type('see you at six')
+    const page = composer.focusOn('field')
+    composer.send()
+    await composer.answer()
+    expect(page.focused()).toBe('field')
   })
 })

@@ -79,24 +79,31 @@ vi.mock('firebase/firestore', () => ({
   },
 }))
 
-const snapOf = (path: string, data: object | null) => ({
+const snapOf = (path: string, data: object | null, pending = false) => ({
   id: path.split('/').pop(),
   ref: { path },
   exists: () => data !== null,
   data: () => data ?? undefined,
-  metadata: { hasPendingWrites: false },
+  metadata: { hasPendingWrites: pending },
 })
 
 const answerDoc = (path: string, data: object | null) => fs.open.get(path)?.(snapOf(path, data))
 
 // Answers every open listen whose name starts with `prefix`: from the server unless said
-// otherwise, and with changed rows unless only the metadata changed
-const answerRows = (prefix: string, rows: Record<string, object>, { fromCache = false, metadataOnly = false } = {}) =>
+// otherwise, and with changed rows unless only the metadata changed. Rows in `pending` are only
+// local writes so far; `confirmed` ones the server just took, and only their metadata changed
+const answerRows = (
+  prefix: string,
+  rows: Record<string, object>,
+  { fromCache = false, metadataOnly = false, pending = [] as string[], confirmed = [] as string[] } = {},
+) =>
   [...fs.open]
     .filter(([name]) => name.startsWith(prefix))
     .forEach(([, next]) => {
-      const docs = Object.entries(rows).map(([path, data]) => snapOf(path, data))
-      next({ docs, docChanges: () => (metadataOnly ? [] : docs), metadata: { fromCache, hasPendingWrites: false } })
+      const docs = Object.entries(rows).map(([path, data]) => snapOf(path, data, pending.includes(path)))
+      const metadata = docs.filter((d) => confirmed.includes(d.ref.path))
+      const docChanges = ({ includeMetadataChanges = false } = {}) => (metadataOnly ? (includeMetadataChanges ? metadata : []) : docs)
+      next({ docs, docChanges, metadata: { fromCache, hasPendingWrites: pending.length > 0 } })
     })
 
 const refuseRows = (prefix: string) =>
@@ -318,6 +325,51 @@ describe('live content says when the server has answered', () => {
     const hello = { 'groups/g/messages/o3': { status: 'published', createdAt: at(200), authorUid: 'ann', text: 'hello' } }
     answerRows('groups/g/messages?status', { ...mine, ...others, ...hello })
     expect(say()).toBe('New message: hello')
+  })
+})
+
+// The shell joins Daily check-in with a write that's local at first, and a member-only listen the
+// rules judge before the server has it is refused. A page listing my memberships has to tell them apart
+describe('rows marked pending', () => {
+  const JOINING = 'groups/daily-check-in/members/me'
+  const rows = { 'groups/a/members/me': { uid: 'me' }, [JOINING]: { uid: 'me' } }
+  type Member = { path: string; pending?: boolean }
+  // Opens my memberships' listen, and gives back its next render
+  const watch = (options?: { pending: boolean }) => {
+    const page = react.component()
+    const show = () => {
+      const found = react.render(page, () => useQueryData<Member>('my-members|me', () => ({ name: 'members?uid==me' }) as unknown as Query, options))
+      react.commit()
+      return found.data
+    }
+    show()
+    return show
+  }
+
+  it('say which are only local writes, and hear the server take one even when its data is the same', () => {
+    const show = watch({ pending: true })
+    answerRows('members?', rows, { pending: [JOINING] })
+    expect(show().map((m) => [m.path, m.pending])).toEqual([
+      ['groups/a/members/me', false],
+      [JOINING, true],
+    ])
+
+    answerRows('members?', rows, { metadataOnly: true, confirmed: [JOINING] })
+    expect(show().map((m) => [m.path, m.pending])).toEqual([
+      ['groups/a/members/me', false],
+      [JOINING, false],
+    ])
+  })
+
+  it('are left as they were when not asked for', () => {
+    const show = watch()
+    answerRows('members?', rows, { pending: [JOINING] })
+    const first = show()
+    expect(first.map((m) => 'pending' in m)).toEqual([false, false])
+
+    // Only metadata changed, so nothing built from the rows is rebuilt
+    answerRows('members?', rows, { metadataOnly: true, confirmed: [JOINING] })
+    expect(show()).toBe(first)
   })
 })
 

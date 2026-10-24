@@ -4,9 +4,12 @@ import type { Status } from './types'
 // Fixed id, also written by scripts/seed.ts. The live project needs this group before anyone can post.
 export const CHECKIN_GROUP = 'daily-check-in'
 
+// A question's words sit straight after the answer above it in the post, and moderation reads the
+// post as one text, so no label starts with a word that would read as the answer carrying on
+// ("Is", "I", "It's"): an ordinary answer about treatment was held as crisis because of it.
 export const CHECKIN_QUESTIONS = [
   { id: 'feeling', label: 'How are you feeling today?' },
-  { id: 'mind', label: 'Is there anything on your mind right now?' },
+  { id: 'mind', label: 'Anything on your mind right now?' },
   { id: 'steps', label: 'What steps do you think you should take to get that off your mind?' },
 ] as const
 

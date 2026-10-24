@@ -6,10 +6,13 @@ import { useDocData } from '../lib/live'
 // One like per person (the like doc id is your uid). Count stays quiet.
 export const LikeButton = ({ postPath, me, count = 0 }: { postPath: string; me: string; count?: number }) => {
   const like = useDocData<{ uid: string }>(`${postPath}/likes/${me}`)
+  // While a press is on its way (offline, until the device is back) another does nothing, and
+  // aria-disabled says so. Disabled instead, the button would drop focus out of the page
   const [busy, setBusy] = useState(false)
   const liked = Boolean(like.data)
 
   const toggle = async () => {
+    if (busy) return
     setBusy(true)
     try {
       const ref = doc(db, `${postPath}/likes/${me}`)
@@ -25,7 +28,14 @@ export const LikeButton = ({ postPath, me, count = 0 }: { postPath: string; me: 
   const label = count > 0 ? `Like, ${count} ${count === 1 ? 'like' : 'likes'}` : 'Like'
 
   return (
-    <button type="button" className={liked ? 'mark is-on' : 'mark'} aria-pressed={liked} aria-label={label} disabled={busy} onClick={() => void toggle()}>
+    <button
+      type="button"
+      className={liked ? 'mark is-on' : 'mark'}
+      aria-pressed={liked}
+      aria-label={label}
+      aria-disabled={busy || undefined}
+      onClick={() => void toggle()}
+    >
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
         <path d="M12 20s-7-4.4-7-9a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 4.6-7 9-7 9z" />
       </svg>

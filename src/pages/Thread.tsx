@@ -7,6 +7,7 @@ import { Composer } from '../components/Composer'
 import { HostNote } from '../components/HostNote'
 import { Item } from '../components/Item'
 import { Quiet } from '../components/Quiet'
+import { Said, useSaid } from '../components/Said'
 import { Who } from '../components/Who'
 import { db } from '../lib/firebase'
 import { useDocData, useLiveContent, useQueryData } from '../lib/live'
@@ -34,6 +35,7 @@ export const Thread = () => {
   const messages = useLiveContent<Message>(open ? `dms/${pairId}/messages` : null, uid, { direction: 'asc', max: 200 })
   const end = useRef<HTMLDivElement>(null)
   const field = useRef<HTMLTextAreaElement>(null)
+  const [said, say] = useSaid(pairId)
   // A full window keeps its length as a new note pushes the oldest out, so the newest counts too
   const newest = messages.data.at(-1)?.id
 
@@ -81,13 +83,15 @@ export const Thread = () => {
         )}
         {messages.data.length === 0 && !messages.loading && !canWrite && <p className="empty">Nothing written yet.</p>}
         {messages.data.map((m) => (
-          <Item key={m.id} item={m} me={uid} blotSize={36} variant="bubble" privateThread>
+          <Item key={m.id} item={m} me={uid} blotSize={36} variant="bubble" privateThread say={say}>
             <p className="voice">{m.text}</p>
           </Item>
         ))}
         <div ref={end} />
       </div>
       <Arrivals items={messages.data} opening={!messages.synced} me={uid} />
+      {/* What I did here, as withdrawing: Arrivals says only what they write */}
+      <Said said={said} />
 
       {canWrite ? (
         <Composer shape="bar" label="Message" submitLabel="Send" rows={1} context="private" textRef={field} onSubmit={send} />

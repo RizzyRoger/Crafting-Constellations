@@ -43,6 +43,8 @@ export const ProfileForm = ({ uid, current, submitLabel, onSaved, onHold }: Prof
 
   const check = checkPenName(penName)
   const hint = check.ok ? null : PEN_NAME_HINTS[check.problem]
+  // A name that holds crisis language is refused like any other, but the resources come with it
+  const nameCrisis = !check.ok && check.problem === 'crisis'
   const noteError = error?.at === 'note' ? error.text : null
   const formError = error?.at === 'form' ? error.text : null
 
@@ -132,6 +134,8 @@ export const ProfileForm = ({ uid, current, submitLabel, onSaved, onHold }: Prof
             <p className="hint">Saved, except the note.</p>
             <CrisisCard audience="writer" />
           </>
+        ) : nameCrisis ? (
+          <CrisisCard audience="writer" />
         ) : (
           saved && !onSaved && <p className="hint">Saved.</p>
         )}

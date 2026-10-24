@@ -1,6 +1,7 @@
+import { moderate } from '@moderation'
 import type { Timestamp } from 'firebase/firestore'
 import { describe, expect, it } from 'vitest'
-import { checkInJoin, promptFits, promptHides, todaysCheckIn } from './checkin'
+import { checkInBody, CHECKIN_QUESTIONS, checkInJoin, checkInTitle, promptFits, promptHides, todaysCheckIn, type CheckInId } from './checkin'
 import type { Status } from './types'
 
 const DAY = 86_400_000
@@ -79,6 +80,29 @@ describe('checkInJoin', () => {
     expect(joins([NONE], { loading: false, data: null })).toBe(0)
     expect(joins([NONE], { loading: true, data: null })).toBe(0)
     expect(checkInJoin(false, { loading: false, data: null }, NONE)).toBe('wait')
+  })
+})
+
+describe('checkInBody', () => {
+  // ROT13, as in functions/src/moderation/moderate.test.ts, so these don't read as plain text here
+  const rot13 = (s: string) => s.replace(/[a-z]/g, (c) => String.fromCharCode(((c.charCodeAt(0) - 97 + 13) % 26) + 97))
+  const ORDINARY = ['zhz pnag tb ba ubezbar gurencl', 'nakvbhf qnq pnag tb ba qvnylfvf', 'gverq qnq pnag tb ba bkltra'].map(rot13)
+  const CRISIS = ['v pnag tb ba', 'v jnag gb qvr'].map(rot13)
+  const ELSE: Record<CheckInId, string> = { feeling: 'Tired but okay', mind: 'The hospital', steps: 'Call the nurse' }
+  // The server moderates the title and the body as one text (functions/src/app.ts textOf)
+  const checkIn = (id: CheckInId, answer: string) =>
+    moderate(`${checkInTitle(new Date(2026, 9, 23))}\n${checkInBody({ ...ELSE, [id]: answer })}`, { context: 'public' })
+
+  // A question sits straight after the answer above it, and the word views drop the line break
+  it.each(CHECKIN_QUESTIONS.map((q) => q.id))('leaves an ordinary answer to %s ordinary', (id) => {
+    for (const answer of ORDINARY) {
+      expect(moderate(answer, { context: 'public' })).toMatchObject({ action: 'publish', crisis: false })
+      expect(checkIn(id, answer)).toMatchObject({ action: 'publish', crisis: false })
+    }
+  })
+
+  it.each(CHECKIN_QUESTIONS.map((q) => q.id))('still reads crisis language in the answer to %s', (id) => {
+    for (const answer of CRISIS) expect(checkIn(id, answer)).toMatchObject({ action: 'hold', crisis: true })
   })
 })
 

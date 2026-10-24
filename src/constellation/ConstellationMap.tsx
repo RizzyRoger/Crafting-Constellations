@@ -11,10 +11,12 @@ interface MapProps extends Omit<LayoutInput, 'width' | 'people'> {
   myGroupIds: Set<string>
   selected: string | null
   onSelect: (uid: string) => void
+  // Whether the chart has its height yet: until its width is measured it's an empty placeholder
+  onLaidOut?: (laidOut: boolean) => void
 }
 
 // Groups are pencil circles, people are wash blots, friendships are pencil lines
-export const ConstellationMap = ({ constellations, groups, memberships, people, lines: friendLines, me, myGroupIds, selected, onSelect }: MapProps) => {
+export const ConstellationMap = ({ constellations, groups, memberships, people, lines: friendLines, me, myGroupIds, selected, onSelect, onLaidOut }: MapProps) => {
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   const [hover, setHover] = useState<string | null>(null)
@@ -32,6 +34,10 @@ export const ConstellationMap = ({ constellations, groups, memberships, people, 
     () => (width > 0 ? layoutConstellation({ width, constellations, groups, memberships, people: peopleIds }) : null),
     [width, constellations, groups, memberships, peopleIds],
   )
+  const laidOut = layout !== null
+  useEffect(() => {
+    onLaidOut?.(laidOut)
+  }, [laidOut, onLaidOut])
   const urls = useBlotUrls(people, NODE)
   const byId = useMemo(() => new Map(people.map((p) => [p.id, p])), [people])
   const at = useMemo(() => new Map(layout?.people.map((p) => [p.uid, p]) ?? []), [layout])

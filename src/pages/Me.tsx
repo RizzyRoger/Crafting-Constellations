@@ -1,4 +1,6 @@
 import { collection, query, where } from 'firebase/firestore'
+import { useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { useSignOut } from '../auth/useSignOut'
@@ -7,6 +9,7 @@ import { PageHead } from '../components/PageHead'
 import { ProfileForm } from '../components/ProfileForm'
 import { Who } from '../components/Who'
 import { db } from '../lib/firebase'
+import { focusForNow } from '../lib/focusForNow'
 import { isFirstClick } from '../lib/groupStanding'
 import { useQueryData } from '../lib/live'
 import { otherInPair } from '../lib/pair'
@@ -14,6 +17,7 @@ import { visibleById, waitingOn, withVisible } from '../lib/people'
 import { hereOf } from '../lib/returnTo'
 import { acceptConnection, blockConnection, removeConnection } from '../lib/social'
 import { setCountVisits, TELEMETRY_AVAILABLE, useCountVisits } from '../lib/telemetry'
+import { tieSaid, type TieChange } from '../lib/tieSaid'
 import type { Connection, Profile } from '../lib/types'
 
 export const Me = () => {
@@ -21,6 +25,9 @@ export const Me = () => {
   const signOut = useSignOut()
   const location = useLocation()
   const countVisits = useCountVisits()
+  // What the last change to Your people did. Its button went with its row, so focus comes here
+  const [said, setSaid] = useState('')
+  const status = useRef<HTMLParagraphElement>(null)
 
   const connections = useQueryData<Connection>(`connections|${uid}`, () =>
     query(collection(db, 'connections'), where('uids', 'array-contains', uid)),
@@ -36,9 +43,18 @@ export const Me = () => {
   const blocked = connections.data.filter((c) => c.status === 'blocked' && c.blockedBy === uid)
 
   // Only a first click (or a key) acts. Each of these moves its row or drops it at once, and the
-  // next row's button slides up under the second click of a double-click
-  const onFirstClick = (work: () => Promise<unknown>) => (e: { detail: number }) => {
-    if (isFirstClick(e.detail)) void work()
+  // next row's button slides up under the second click of a double-click. The row takes the focused
+  // button with it (the whole section goes with the last one), so focus moves first, to where it's said.
+  // A click leaves a long list where it is, since the row shows the change; a key brings focus into view
+  const onFirstClick = (c: Connection, change: TieChange, work: () => Promise<unknown>) => (e: { detail: number }) => {
+    if (!isFirstClick(e.detail)) return
+    // Emptied on the page before focus comes, or the last change's words are read out for this one
+    flushSync(() => setSaid(''))
+    if (status.current) focusForNow(status.current, { preventScroll: e.detail > 0 })
+    void work().then(
+      () => setSaid(tieSaid(change, byId.get(otherInPair(c.id, uid))?.penName)),
+      () => setSaid('That didn’t go through. Try again in a moment.'),
+    )
   }
 
   const personOf = (c: Connection) => {
@@ -61,6 +77,12 @@ export const Me = () => {
 
       <CheckIn />
 
+      {/* Outside Your people, which goes with its last row, and mounted from the start, so screen
+          readers announce what a change did when it lands */}
+      <p ref={status} className="meta live" role="status">
+        {said}
+      </p>
+
       {(incoming.length > 0 || outgoing.length > 0 || friends.length > 0 || blocked.length > 0) && (
         <section className="section" aria-labelledby="people">
           <div className="section__head">
@@ -75,10 +97,15 @@ export const Me = () => {
                 {personOf(c)}
                 <span className="row">
                   <span className="meta">wants to connect</span>
-                  <button type="button" className="act act--quiet act--wash" disabled={!claims.emailVerified} onClick={onFirstClick(() => acceptConnection(c.id))}>
+                  <button
+                    type="button"
+                    className="act act--quiet act--wash"
+                    disabled={!claims.emailVerified}
+                    onClick={onFirstClick(c, 'accept', () => acceptConnection(c.id))}
+                  >
                     Accept
                   </button>
-                  <button type="button" className="link-btn" onClick={onFirstClick(() => removeConnection(c.id))}>
+                  <button type="button" className="link-btn" onClick={onFirstClick(c, 'decline', () => removeConnection(c.id))}>
                     Not now
                   </button>
                 </span>
@@ -89,7 +116,7 @@ export const Me = () => {
                 {personOf(c)}
                 <span className="row">
                   <span className="meta">request sent</span>
-                  <button type="button" className="link-btn" onClick={onFirstClick(() => removeConnection(c.id))}>
+                  <button type="button" className="link-btn" onClick={onFirstClick(c, 'cancel', () => removeConnection(c.id))}>
                     Cancel
                   </button>
                 </span>
@@ -102,10 +129,10 @@ export const Me = () => {
                   <Link to={`/messages/${c.id}`} className="link-btn">
                     Write
                   </Link>
-                  <button type="button" className="link-btn" onClick={onFirstClick(() => removeConnection(c.id))}>
+                  <button type="button" className="link-btn" onClick={onFirstClick(c, 'disconnect', () => removeConnection(c.id))}>
                     Disconnect
                   </button>
-                  <button type="button" className="link-btn" onClick={onFirstClick(() => blockConnection(c.id, uid))}>
+                  <button type="button" className="link-btn" onClick={onFirstClick(c, 'block', () => blockConnection(c.id, uid))}>
                     Block
                   </button>
                 </span>
@@ -114,7 +141,7 @@ export const Me = () => {
             {blocked.map((c) => (
               <li key={c.id} className="row" style={{ justifyContent: 'space-between' }}>
                 {personOf(c)}
-                <button type="button" className="link-btn" onClick={onFirstClick(() => removeConnection(c.id))}>
+                <button type="button" className="link-btn" onClick={onFirstClick(c, 'unblock', () => removeConnection(c.id))}>
                   Unblock
                 </button>
               </li>

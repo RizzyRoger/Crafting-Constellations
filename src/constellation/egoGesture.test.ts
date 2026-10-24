@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { click, dragOf, holdsPage, IDLE, lift, markDragged, pressDot, type Gesture } from './egoGesture'
+import { click, dragOf, forgetGone, holdsPage, IDLE, lift, markDragged, pressDot, type Gesture } from './egoGesture'
 
 // The pointer events EgoMap feeds in, in order. A touch drag ends in 'up' with no click;
 // a mouse drag ends in 'up' and then a click on the dot it held
@@ -73,5 +73,33 @@ describe('ego gesture', () => {
     expect(holdsPage(run([{ down: 'a' }]).gesture)).toBe(true)
     expect(holdsPage(run([{ down: 'a' }, { move: [140, 120] }]).gesture)).toBe(true)
     expect(holdsPage(run([{ down: 'a' }, { move: [140, 120] }, { up: true }]).gesture)).toBe(false)
+  })
+})
+
+// A live change can take the pressed dot off the chart mid-press, and its lift then lands nowhere
+describe('a pressed dot leaving the chart', () => {
+  const pressed = run([{ down: 'b' }, { move: [140, 120] }]).gesture
+  const hold = { uid: 'b', x: 140, y: 120 }
+  const without = (gone: string) => (uid: string) => uid !== gone
+
+  it('ends the press and the drag, so the page scrolls again and the drag stops stepping', () => {
+    const kept = forgetGone(pressed, hold, without('b'))
+    expect(holdsPage(kept.gesture)).toBe(false)
+    expect(kept.hold).toBeNull()
+  })
+
+  it('ends a press that was still a tap', () => {
+    const tapping = run([{ down: 'b' }]).gesture
+    expect(holdsPage(forgetGone(tapping, null, without('b')).gesture)).toBe(false)
+  })
+
+  it('leaves them be while the dot is still there', () => {
+    const kept = forgetGone(pressed, hold, without('c'))
+    expect(kept.gesture).toBe(pressed)
+    expect(kept.hold).toBe(hold)
+  })
+
+  it('still opens the next person tapped', () => {
+    expect(click(forgetGone(pressed, hold, without('b')).gesture, 'me').opens).toBe(true)
   })
 })

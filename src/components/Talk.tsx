@@ -9,6 +9,7 @@ import { ConfirmEmail } from './ConfirmEmail'
 import { HostNote } from './HostNote'
 import { Item } from './Item'
 import { MentionText } from './MentionText'
+import { Said, useSaid } from './Said'
 
 interface TalkProps {
   // A messages collection: groups/g/messages or chats/c/messages
@@ -39,6 +40,7 @@ export const Talk = ({
   const messages = useLiveContent<Message>(path, me, { direction: 'asc', max: 80 })
   const end = useRef<HTMLDivElement>(null)
   const field = useRef<HTMLTextAreaElement>(null)
+  const [said, say] = useSaid(path)
   // A full window keeps its length as a new message pushes the oldest out, so the newest counts too
   const newest = messages.data.at(-1)?.id
 
@@ -71,13 +73,15 @@ export const Talk = ({
             <p className="empty">{empty}</p>
           ))}
         {messages.data.map((m) => (
-          <Item key={m.id} item={m} me={me} blotSize={36} variant="bubble" privateThread={privateThread}>
+          <Item key={m.id} item={m} me={me} blotSize={36} variant="bubble" privateThread={privateThread} say={say}>
             <MentionText text={m.text} mentioned={m.mentioned} me={me} />
           </Item>
         ))}
         <div ref={end} />
       </div>
       <Arrivals items={messages.data} opening={!messages.synced} me={me} />
+      {/* What I did here, as withdrawing: Arrivals says only what others write */}
+      <Said said={said} />
       {verified ? (
         <Composer
           shape="bar"
