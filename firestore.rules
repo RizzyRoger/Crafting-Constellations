@@ -35,10 +35,11 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/groups/$(gid)/posts/$(pid)).data.status == 'published';
     }
     function isStr(v, min, max) { return v is string && v.size() >= min && v.size() <= max; }
-    // Ids of new writing: letters and digits, as addDoc makes them. Functions join a
-    // path's ids with '~' for its queue and notice ids, so a post named
-    // 'P~comments~C' would take over comment C's review entry and its reports.
-    function plainId(id) { return id.matches('^[A-Za-z0-9]+$'); }
+    // Ids of new writing: letters and digits, as addDoc makes them (20 of them). Functions
+    // join a path's ids with '~' for its queue and notice ids, so a post named
+    // 'P~comments~C' would take over comment C's review entry and its reports, and a
+    // long one would make ids over Firestore's 1500 bytes: never reported, nor replied to.
+    function plainId(id) { return id.matches('^[A-Za-z0-9]{1,40}$'); }
     function nd() { return request.resource.data; }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
 

@@ -413,6 +413,17 @@ describe('ids of new writing', () => {
       }
     }
   })
+
+  // A long one would make queue and notice ids over Firestore's 1500 bytes, so it could never be
+  // reported, nor anyone told of a comment on it
+  it('refuses an id longer than 40, twice what addDoc makes, everywhere', async () => {
+    for (const [path, fields] of places) {
+      await assertSucceeds(setDoc(doc(alice(), `${path}/${'a'.repeat(40)}`), pending('alice', fields)))
+      for (const id of ['a'.repeat(41), 'a'.repeat(1480)]) {
+        await assertFails(setDoc(doc(alice(), `${path}/${id}`), pending('alice', fields)))
+      }
+    }
+  })
 })
 
 describe('mentions and notifications', () => {
