@@ -61,8 +61,23 @@ const LINK_OR_EMAIL = new RegExp(`(${EMAIL.source})|${LINK.source}`, 'gu')
 // "«https://www.nhs.uk»"
 const LINK_END = /(?:'s|[.,;:!?'"”*\]}|»])+$/u
 
+// So does a dash, an emoji or an ideographic comma with no space after the
+// link: "www.samaritans.org—they were kind". A browser would read on into the
+// last part of the host, and no site has a name like that. Not when what
+// follows could still reach a site through a dot, a login or an escaped dot:
+// "https://www.nhs.uk—.evil.page", "https://www.nhs.uk—x@1249763466".
+// Emoji leave out the digits, # and * that also count as one.
+const LINK_BREAK = /[\u2013\u2014\u3001]|(?![#*\d])\p{Emoji}/u
+const ANOTHER_SITE = /[.@%]/
+
+const trimLink = (link: string) => {
+  const trimmed = link.replace(LINK_END, '')
+  const at = trimmed.search(LINK_BREAK)
+  return at > 0 && !ANOTHER_SITE.test(trimmed.slice(at)) ? trimmed.slice(0, at).replace(LINK_END, '') : trimmed
+}
+
 const findLinks = (raw: string) =>
-  [...raw.matchAll(LINK_OR_EMAIL)].filter((m) => !m[1]).map((m) => m[0].replace(LINK_END, ''))
+  [...raw.matchAll(LINK_OR_EMAIL)].filter((m) => !m[1]).map((m) => trimLink(m[0]))
 
 const isPersonalPhone = (match: string) => {
   const digits = match.replace(/\D/g, '')
@@ -109,7 +124,7 @@ export const moderate = (text: string, { context = 'public' }: { context?: Conte
 
   if (context === 'public') {
     // In any script's digits, as Arabic, Persian or Hindi keyboards type them
-    const contact = digits.match(EMAIL)?.[0] ?? findPhone(digits)
+    const contact = digits.match(EMAIL)?.[1] ?? findPhone(digits)
     if (contact) matches.push({ category: 'personalInfo', term: contact })
   }
 

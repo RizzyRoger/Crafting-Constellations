@@ -2,7 +2,7 @@
 // (see normalize.ts): lowercase, no apostrophes, leetspeak folded.
 // Bump LEXICON_VERSION whenever a list changes; it is stored on queue items.
 
-export const LEXICON_VERSION = 'lex-2026-10-23'
+export const LEXICON_VERSION = 'lex-2026-10-23f'
 
 export type Category = 'slur' | 'harassment' | 'selfHarm' | 'spam' | 'personalInfo'
 
@@ -33,6 +33,12 @@ const GENTLY =
   'peacefully|quietly|calmly|comfortably|painlessly|gently|at home|in peace|with dignity|' +
   'without (?:pain|suffering)|in (?:his|her|their) sleep|surrounded by'
 
+// Less suffering, wished kindly: "I hope she suffers less with the new pump",
+// "I hope he suffers no more", "you deserve to suffer less". Only a space, as
+// the clauses view puts "suffer, no more excuses" on two lines.
+const RELIEF = '(?:(?:a (?:little|lot|bit)|much|far) )?less|as little|no (?:more|longer)'
+const NO_RELIEF = `\\b(?! (?:${RELIEF})\\b)`
+
 // Cancer as a wish, not the care that comes with it: "you deserve cancer
 // support too", "I hope he gets cancer treatment soon", "cancer-free". Only a
 // space, as the clauses view puts "cancer. Support …" on two lines.
@@ -62,29 +68,38 @@ const LOVED_AS =
 // one that turns it round: "you are not worthless", "when you feel worthless",
 // "are you a control freak like me?"
 const NOT_AN_INSULT = 'not|never|no|arent|werent|aint|feel|feels|felt|feeling|control'
+const WORD_BETWEEN = `(?:(?!(?:${NOT_AN_INSULT})\\b)\\w+ )?`
+const INSULTS = 'idiot|moron|loser|pathetic|worthless|disgusting|piece of shit'
+
+// The illness people swear at, read in normalize.ts: "fuck you cancer". Not MS
+// or ALS, which are also a title and a name ("fuck off Ms Smith").
+export const ILLNESS =
+  'cancer|chemo|chemotherapy|radiotherapy|radiation|tumou?rs?|leuka?emia|lymphoma|myeloma|melanoma|sarcoma|' +
+  "dementia|alzheimer'?s|parkinson'?s|disease|illness"
 
 // Abuse aimed at a person. Venting about illness ("this is so fucking hard")
-// is deliberately not here.
+// is deliberately not here, and swearing at it ("fuck you cancer") is taken
+// out in normalize.ts.
 export const HARASSMENT: RegExp[] = [
   /\b(?:go )?(?:kill|hang) (?:yo)?ur ?self\b/u,
   /\bkill ?yourself\b/u,
   /\bkys\b/u,
   /\b(?:you|u) should (?:just )?(?:die|be dead)\b/u,
   /\bgo die\b/u,
-  new RegExp(`\\bhope (?:you|u) (?:die|dies|gets? ${CANCER}|suffer|suffers)\\b`, 'u'),
-  new RegExp(`\\bhope (?:she|he|they) (?:gets? ${CANCER}|suffers?|dies?\\b(?!\\s(?:${GENTLY})\\b))\\b`, 'u'),
-  new RegExp(`\\b(?:you|u) deserves? (?:to die|to suffer|${CANCER})\\b`, 'u'),
-  new RegExp(`\\b(?:she|he|they) deserves? (?:${CANCER}|to suffer|to die\\b(?!\\s(?:${GENTLY})\\b))\\b`, 'u'),
+  new RegExp(`\\bhope (?:you|u) (?:die|dies|gets? ${CANCER}|suffers?${NO_RELIEF})\\b`, 'u'),
+  new RegExp(`\\bhope (?:she|he|they) (?:gets? ${CANCER}|suffers?${NO_RELIEF}|dies?\\b(?!\\s(?:${GENTLY})\\b))\\b`, 'u'),
+  new RegExp(`\\b(?:you|u) deserves? (?:to die|to suffer${NO_RELIEF}|${CANCER})\\b`, 'u'),
+  new RegExp(`\\b(?:she|he|they) deserves? (?:${CANCER}|to suffer${NO_RELIEF}|to die\\b(?!\\s(?:${GENTLY})\\b))\\b`, 'u'),
   new RegExp(`\\bnobody wants (?:you|u)\\b(?! (?:${SPARED})\\b)`, 'u'),
   new RegExp(`\\bnobody (?:likes|loves) (?:you|u)\\b(?! (?:${SPARED}|${LOVED_AS})\\b)`, 'u'),
   /\bfuck (?:you|u|off)\b/u,
   // "You can bitch and moan here", "if you freak out": the verbs, not the
-  // insults. After "a" or "such" they are the insults, whatever follows.
+  // insults. After "a" or "such" they are the insults, whatever follows, even
+  // with a "you" between: "such u bitch about it".
   new RegExp(
-    `\\b(?:you|u|youre|ur) (?:are |r )?(?:such |an? )?(?:(?!(?:${NOT_AN_INSULT})\\b)\\w+ )?` +
-      '(?:idiot|moron|loser|(?<=\\b(?:an?|such) (?:\\w+ )?)(?:bitch|freak)|' +
-      'bitch(?! (?:and (?:moan|whine|complain|vent)|about)\\b)|freak(?! out\\b)|' +
-      'pathetic|worthless|disgusting|piece of shit)\\b',
+    `\\b(?:(?:an?|such) (?:you|u|youre|ur) (?:bitch|freak)|` +
+      `(?:you|u|youre|ur) (?:are |r )?(?:(?:such |an? )${WORD_BETWEEN}(?:${INSULTS}|bitch|freak)|` +
+      `${WORD_BETWEEN}(?:${INSULTS}|bitch(?! (?:and (?:moan|whine|complain|vent)|about)\\b)|freak(?! out\\b))))\\b`,
     'u',
   ),
   /\b(?:shut up|stfu) (?:and die|bitch)\b/u,
@@ -148,10 +163,11 @@ const PLACE =
   `with (?:(?:${DETERMINER}) )?(?:${FAMILY})(?! (?:gone|dead)\\b)`
 // A time to wake, as it reads once leetspeak is folded: "5am" reads "sam",
 // "6.30am" "6 eoam". "At all" and "in the morning" are how it feels, and so
-// is waking in hospital "again", as people say it after an attempt.
+// is waking in hospital "again", as people say it after an attempt, or at a
+// time "or ever again".
 const DIGIT = '[\\doieast]'
 const WAKING =
-  `at ${DIGIT}{1,2}(?: ${DIGIT}{2})? ?(?:am|pm|oclock)|` +
+  `at ${DIGIT}{1,2}(?: ${DIGIT}{2})? ?(?:am|pm|oclock)(?! (?:\\w+ )?ever again\\b)|` +
   'in (?:(?:a|the) )?(?:hospital|hospice|ward|icu|intensive care|(?:care|nursing) home)(?! (?:\\w+ )?again\\b)'
 const SOMEONE = `${DETERMINER}|${FAMILY}|him|them|you|us|everyone|everybody|anyone|anybody`
 
@@ -233,8 +249,10 @@ export const LINK = new RegExp(
 
 // The last label starts with a letter, so "tomorrow@10.15" is a time. Read
 // only from where an address can start: tried from every letter of a long
-// word, it took time with the square of its length.
-export const EMAIL = /(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z][\w-]*/gu
+// word, it took time with the square of its length. The character before it
+// is part of the match, so the address is the first group. (Not a lookbehind,
+// which Safari before 16.4 can't read: the site would not load at all.)
+export const EMAIL = /(?:^|[^\w.+-])([\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z][\w-]*)/u
 
 // Global: a crisis line earlier in the text must not hide a number after it
 export const PHONE: RegExp[] = [

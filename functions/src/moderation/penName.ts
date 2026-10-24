@@ -2,7 +2,7 @@ import { RESERVED_NAME_WORDS } from './lexicon.js'
 import { moderate } from './moderate.js'
 import { normalize } from './normalize.js'
 
-export type PenNameProblem = 'length' | 'characters' | 'mixed' | 'contact' | 'reserved' | 'unkind'
+export type PenNameProblem = 'length' | 'characters' | 'mixed' | 'contact' | 'reserved' | 'crisis' | 'unkind'
 
 export type PenNameCheck = { ok: true; value: string } | { ok: false; problem: PenNameProblem }
 
@@ -12,6 +12,7 @@ export const PEN_NAME_HINTS: Record<PenNameProblem, string> = {
   mixed: 'Keep to one alphabet, so no letter can pass for another.',
   contact: 'No emails or long numbers — a pen name keeps you private.',
   reserved: 'Pen names can’t suggest a title or role. Professionals get a licensed mark instead.',
+  crisis: 'Choose a different name. If you need someone right now, there are lines below.',
   unkind: 'Choose a different name.',
 }
 
@@ -81,8 +82,11 @@ const readsAsLetter = (digit: string) => /^\p{L}$/u.test(normalize(digit).words)
 // A number, and the digit in it that may be a letter: one digit inside a word
 // ("Adm1n"), or for FIRST_LETTER the last digit of any number a word runs on
 // from ("4dmin2", "24dmin"). Never where a new word starts ("Nurse1Joy").
-const LETTER_IN_WORD = /(?<=[\p{L}\p{M}])(\p{N})(?=[\p{L}\p{M}])(?!\p{Lu}\p{Ll})|\p{N}+/gu
-const FIRST_LETTER = /\p{N}*(\p{N})(?=[\p{L}\p{M}])(?!\p{Lu}\p{Ll})|\p{N}+/gu
+// Both match what comes before the number first, and keep it: the letter a
+// digit inside a word follows, or nothing. Not a lookbehind, which Safari
+// before 16.4 can't read: the site would not load at all.
+const LETTER_IN_WORD = /([\p{L}\p{M}])(\p{N})(?=[\p{L}\p{M}])(?!\p{Lu}\p{Ll})|\p{N}+/gu
+const FIRST_LETTER = /()\p{N}*(\p{N})(?=[\p{L}\p{M}])(?!\p{Lu}\p{Ll})|\p{N}+/gu
 
 // Joined words pulled apart ("SiteAdmin", "DRHeron"), and each number split
 // off whole, in any case ("Nurse2Joy", "nurse2joy", "2admin", "Admin12"),
@@ -91,24 +95,29 @@ const FIRST_LETTER = /\p{N}*(\p{N})(?=[\p{L}\p{M}])(?!\p{Lu}\p{Ll})|\p{N}+/gu
 // number splits off ("24dmin").
 const pullApart = (value: string, letters = LETTER_IN_WORD) =>
   value
-    .replace(/(?<![\p{L}\p{M}\p{N}])\p{L}{2}(?=\p{Lu})/gu, (start) => (SHORT_FORMS.includes(start.toLowerCase()) ? '' : start))
+    .replace(/(^|[^\p{L}\p{M}\p{N}])(\p{L}{2})(?=\p{Lu})/gu, (_, before: string, start: string) =>
+      before + (SHORT_FORMS.includes(start.toLowerCase()) ? '' : start),
+    )
     .replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2')
     .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, '$1 $2')
-    .replace(letters, (number, letter?: string) => {
-      if (!letter || !readsAsLetter(letter)) return ` ${number} `
+    .replace(letters, (match: string, before = '', letter?: string) => {
+      const number = match.slice(before.length)
+      if (!letter || !readsAsLetter(letter)) return `${before} ${number} `
       const rest = number.slice(0, -letter.length)
-      return rest ? ` ${rest} ${letter}` : letter
+      return before + (rest ? ` ${rest} ${letter}` : letter)
     })
 
 // Credentials written apart, with spaces ("Ann M D", "Ann Ph. D."). The joined
 // view glues only three or more single letters, so two are glued here, and so
 // is a short piece with no vowel ("Ph", "Psy") with the single letters after
 // it, the last maybe plural ("Ph Ds"). A name ending in one initial ("Mo D")
-// stays apart.
-const LETTER_RUN = /(?<!\S)\p{L}(?: \p{L})+s?(?!\S)/gu
-const ABBREVIATION = /(?<!\S)(?:(?![aeiou])\p{L}){2,3}(?: \p{L})+s?(?!\S)/gu
+// stays apart. The space before a run is matched too, and kept.
+const LETTER_RUN = /(^|\s)(\p{L}(?: \p{L})+s?)(?!\S)/gu
+const ABBREVIATION = /(^|\s)((?:(?![aeiou])\p{L}){2,3}(?: \p{L})+s?)(?!\S)/gu
 const gluedApart = (words: string) =>
-  [LETTER_RUN, ABBREVIATION].map((run) => words.replace(run, (pieces) => pieces.replace(/ /g, '')))
+  [LETTER_RUN, ABBREVIATION].map((run) =>
+    words.replace(run, (_, space: string, pieces: string) => space + pieces.replace(/ /g, '')),
+  )
 
 // Capitals standing alone before a name are its initials ("D.R. Patel", "R. N.
 // Sharma", "M D Rahim"), not a credential, which follows a name ("Jane Doe
@@ -131,12 +140,15 @@ const readsAsRole = (value: string, reserved: RegExp, { glue = true } = {}) =>
 const suggestsRole = (value: string, reserved: RegExp) => {
   const plain = plainLetters(value)
   const named = plain.replace(INITIALS, '')
-  const undotted = named.replace(/(?<=\p{L})\.(?=\p{L})/gu, '')
+  const undotted = named.replace(/(\p{L})\.(?=\p{L})/gu, '$1')
   return (
     readsAsRole(plain, reserved, { glue: false }) ||
     [...new Set([named, undotted])].some((view) => readsAsRole(view, reserved))
   )
 }
+
+// The most the pen name and chat name fields take (maxLength on each input)
+const TYPED_MAX = 40
 
 // Chat and group names ({ chat: true }) name a conversation, not a person, so
 // they can't pass for someone: a plural ("Questions for doctors") or a second
@@ -144,6 +156,12 @@ const suggestsRole = (value: string, reserved: RegExp) => {
 // alphabets ("Аdmin"), still isn't.
 export const checkPenName = (input: string, { chat = false } = {}): PenNameCheck => {
   const value = tidyPenName(input)
+  // What the name says comes before anything wrong with it as a name: crisis
+  // language gets resources, not "choose another", even when it is too long.
+  // Read only up to what the name fields let anyone type, which keeps
+  // moderate() off a name of any size.
+  const verdict = value.length <= TYPED_MAX ? moderate(value, { context: 'public' }) : undefined
+  if (verdict?.crisis) return { ok: false, problem: 'crisis' }
   if (value.length < 2 || value.length > 32) return { ok: false, problem: 'length' }
   if (!isMadeOfNameCharacters(value)) return { ok: false, problem: 'characters' }
   if (chat ? value.split(' ').some(mixesScripts) : mixesScripts(value)) return { ok: false, problem: 'mixed' }
@@ -151,7 +169,7 @@ export const checkPenName = (input: string, { chat = false } = {}): PenNameCheck
   if (/\p{Nd}{6,}/u.test(value)) return { ok: false, problem: 'contact' }
 
   if (suggestsRole(value, chat ? RESERVED_SINGULAR : RESERVED)) return { ok: false, problem: 'reserved' }
-  if (moderate(value, { context: 'public' }).action === 'hold') return { ok: false, problem: 'unkind' }
+  if (verdict?.action === 'hold') return { ok: false, problem: 'unkind' }
   return { ok: true, value }
 }
 

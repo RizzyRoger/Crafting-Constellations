@@ -27,6 +27,8 @@
 // - clauses: words, one clause per line, so a pattern can tell
 //          "I can't go on. The pain…" from "I can't go on the trial"
 
+import { ILLNESS } from './lexicon.js'
+
 // Format and default-ignorable characters: zero-width spaces and joiners,
 // direction marks and isolates, invisible operators, fillers, variation
 // selectors. One inside a word looks like nothing but splits it for matching.
@@ -72,11 +74,51 @@ const foldInWord = (text: string) => foldLeet(text.replace(WORD_END, '$1 '))
 // for its last letters is read: "holiday!", "ky$!", "die|$"
 const BANG_END = /([\p{L}\p{N}][@$]*)[!|][!|@$]*(?![\p{L}\p{N}])/gu
 
-// A number and "kms" is a distance ("40 kms away"), not "kill myself". After
-// "want" or "going", a 2 is "to" unless a distance follows: "I want 2 kms"
-// stays, "going 2 kms down the road" goes.
-const DISTANCE =
-  /\b((?:wants?|wanna|going|gonna) 2\s*km'?s)\b(?! (?:away|down|up|along|further|more|from|to|round|each|a day)\b)|\d(?:[\d.,]*\d)?\s*km'?s\b/gu
+// A number and "kms" is a distance ("40 kms away"), not "kill myself". So is
+// one counted in words when a distance follows ("a few kms away", "hundreds of
+// kms for her scans"), which the count is kept for; without one ("so many kms
+// thoughts") it's read as it is meant. After "want" or "going", a 2 is "to"
+// unless a distance follows: "I want 2 kms" stays, "going 2 kms down the road"
+// goes. A bare "kms", or one after "gonna", "about" or "one" ("no one kms"), is
+// still read as it is meant.
+const COUNT =
+  '(?:a )?few|(?:a )?couple(?: of)?|several|many|lots of|hundreds of|thousands of|' +
+  'two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|hundred|thousand'
+// Words that make a counted "kms" a distance: where to, how far, how often
+const AWAY = 'away|from|to|for|each|per|of|is|down|up|along|further|more|round|a day|back|home|there|out'
+const DISTANCE = new RegExp(
+  `\\b((?:wants?|wanna|going|gonna) 2\\s*km'?s)\\b(?! (?:away|down|up|along|further|more|from|to|round|each|a day)\\b)|` +
+    `\\d(?:[\\d.,]*\\d)?\\s*km'?s\\b|\\b(${COUNT})\\s+km'?s\\b(?=\\s+(?:${AWAY})\\b)`,
+  'gu',
+)
+
+// A time written with dots: "5 a.m." reads as "a m" in the word views, and the
+// tight clause split cuts it at its inner dot, so neither can tell it is a
+// time. Only straight after a digit, so "a.m." elsewhere is left alone. A space
+// after the dot goes too ("5 a. m.").
+const AM_PM = /(\d ?[ap])\. ?(?=m\b)/gu
+
+// Swearing at the illness, not at a person: "fuck you cancer", "Fuck off,
+// chemo!", "Dear cancer, fuck you." Read here, where the punctuation still
+// shows the illness standing on its own ("fuck you, cancer boy" and "Fuck you.
+// Cancer is no excuse" are aimed at a person), and where the words before the
+// illness named first can be read. Only the "you" or "off" goes ("fuck
+// cancer"), so whatever else is said is still read.
+const SWEAR = 'f+u+c+k+'
+const AT_YOU = ' +(?:y+o+u+|u+|o+f{2,})\\b'
+const THE_ILLNESS = `(?:(?:stupid|bloody|fucking|evil|damn|damned|horrible|awful|cruel|vile) )?(?:${ILLNESS})\\b`
+// An emoji, but not the digits, # or * that also count as one
+const EMOJI = '(?![#*\\d])\\p{Emoji}'
+// Where the clause ends, as the clauses view reads it, or a quote closes
+const ENDS_HERE = `(?=\\s*(?:[.,;:!?'"”)-]+(?![\\p{L}\\p{N}])|[\\n\\u2013\\u2014]|${EMOJI}|$))`
+// No line break after the one that starts the clause: tried from each line
+// break in a run of blank lines, it took time with the square of its length.
+// The last one in the run still starts the clause.
+const SWORN_AT_ILLNESS = new RegExp(
+  `\\b(${SWEAR})${AT_YOU}(?=,? +${THE_ILLNESS}${ENDS_HERE})|` +
+    `((?:^|[.,;:!?'"“(\\n\\u2013\\u2014]|${EMOJI})[^\\S\\n]*(?:(?:dear|hey|oi|oh) )?${THE_ILLNESS},? +)(${SWEAR})${AT_YOU}${ENDS_HERE}`,
+  'gu',
+)
 
 // Punctuation that ends a word, a dash, a line break or an emoji ends a
 // clause: "I can't go on 😭 the pain…". So does a full stop, ! or ? with the
@@ -178,15 +220,22 @@ const readWord = (word: string) => {
 // are one word too, as the joined view reads them: "k і l l".
 const IN_WORD = '\\p{L}\\p{M}\\p{N}@$'
 const WORD = new RegExp(`[${IN_WORD}]+`, 'gu')
-const ALONE = `(?<![${IN_WORD}])[\\p{L}\\p{N}@$]\\p{M}*(?![${IN_WORD}])`
-const SPACED_OUT = new RegExp(`${ALONE}(?:[^${IN_WORD}]+${ALONE}){2,}`, 'gu')
+// Where a word starts: the start of the text, or a character outside a word,
+// matched as the first group and put back. Not a lookbehind, which Safari
+// before 16.4 can't read: the site would not load at all.
+const WORD_START = `(^|[^${IN_WORD}])`
+const fromWordStart = (read: (word: string) => string) => (_: string, start: string, word: string) =>
+  start + read(word)
+// Each letter after the first follows a gap, so it starts a word already
+const ALONE = `[\\p{L}\\p{N}@$]\\p{M}*(?![${IN_WORD}])`
+const SPACED_OUT = new RegExp(`${WORD_START}(${ALONE}(?:[^${IN_WORD}]+${ALONE}){2,})`, 'gu')
 
 // Pieces of a word joined by apostrophes, which the word views drop: "k'і'll"
 // reads "kіll" there, so it is read whole here too. Not an English 's after a
 // word in another language: "ρακί's" is raki's, not one disguised word. Only
 // from the start of a word: tried from every letter of a long one, it took
 // time with the square of its length.
-const GLUED = new RegExp(`(?<![${IN_WORD}])[${IN_WORD}]+(?:'[${IN_WORD}]+)+`, 'gu')
+const GLUED = new RegExp(`${WORD_START}([${IN_WORD}]+(?:'[${IN_WORD}]+)+)`, 'gu')
 const readGlued = (word: string) => {
   const stem = word.replace(/'s$/i, '')
   return stem !== word && !isDisguised(stem) ? word : readWord(word)
@@ -219,15 +268,18 @@ export const readAsLatin = (text: string) =>
       .replace(INVISIBLE, '')
       .replace(QUOTES, "'")
       .normalize('NFD')
-      .replace(SPACED_OUT, readWord)
-      .replace(GLUED, readGlued)
+      .replace(SPACED_OUT, fromWordStart(readWord))
+      .replace(GLUED, fromWordStart(readGlued))
       .replace(WORD, readWord),
   )
 
 export const normalize = (text: string): Normalized => {
   const raw = text.normalize('NFKC').replace(INVISIBLE, '').replace(QUOTES, "'").replace(/\u3002/g, '.').toLowerCase()
   const digits = raw.replace(OTHER_DIGIT, asciiDigit)
-  const prose = digits.replace(DISTANCE, (_, wish?: string) => wish ?? ' ')
+  const prose = digits
+    .replace(AM_PM, '$1')
+    .replace(SWORN_AT_ILLNESS, (_, swear?: string, before = '', swornAfter = '') => swear ?? before + swornAfter)
+    .replace(DISTANCE, (_, wish?: string, count?: string) => wish ?? (count ? `${count} ` : ' '))
   const words = wordsOf(prose)
   const joined = words.replace(/\b(?:\p{L} ){2,}\p{L}\b/gu, (run) => run.replace(/ /g, ''))
   const unmarked = wordsOf(prose.replace(WORD_AT, '$1').replace(/[!|$]+/g, ' '))

@@ -65,6 +65,13 @@ describe('moderate — publishes ordinary support talk', () => {
     "I can't keep going at this pace",
     "I don't want to wake up at 5am again for chemo",
     "I don't want to wake up at 6.30am",
+    // The same times with the dots people write them with
+    "I don't want to wake up at 5 a.m. again for chemo",
+    "I don't want to wake up at 5a.m. again for chemo",
+    "I don't want to wake up at 5 A.M. again for chemo",
+    "I don't want to wake up at 5 a. m. again for chemo",
+    "I don't want to wake up at 6:30 a.m.",
+    "I don't want to wake up at 7 p.m.",
     "I don't want to wake up in hospital",
     "I don't want to live on my own",
     "I don't want to live by the sea",
@@ -75,6 +82,12 @@ describe('moderate — publishes ordinary support talk', () => {
     "I'm taking my life back after treatment",
     'the hospital is 40 kms away',
     'it is only 2 kms away',
+    // A distance counted in words, not numerals
+    'the hospital is a few kms away',
+    'we drove hundreds of kms for her scans',
+    'only a couple of kms from home',
+    'how many kms is it to the hospice?',
+    'its ten kms each way',
     "We're going 2 kms down the road for lunch",
     "I'm going to odd places",
     'I wanna go home',
@@ -151,6 +164,23 @@ describe('moderate — harassment', () => {
     'you can bitch and moan here',
     'you can bitch and vent here',
     'you can bitch about it here',
+    // Swearing at the illness, not a person
+    'Fuck you cancer',
+    'Scan clear today. Fuck off, cancer!',
+    'fuck you chemo',
+    'Scan clear today. Cancer, fuck off!',
+    'Dear cancer, fuck you.',
+    'Fuck you cancer, you took my mum',
+    'fuck off stupid cancer \u{1F621}',
+    'Her t-shirt says "Cancer, fuck off"',
+    // Wishing someone less suffering
+    'I hope you suffer less after the new meds',
+    'I hope she suffers less with the new pump',
+    'I hope he suffers no more',
+    'I hope she suffers no longer',
+    'I hope they suffer as little as possible',
+    'You deserve to suffer a lot less',
+    'He deserves to suffer no more',
   ])('publishes support that only sounds like abuse: %j', (text) => {
     expect(held(text).action).toBe('publish')
     expect(held(text, 'private').action).toBe('publish')
@@ -194,6 +224,21 @@ describe('moderate — harassment', () => {
     "you're such a bitch about everything",
     'you are a bitch about it',
     "you're a stupid bitch about everything",
+    // So is an "a" or "such" just before "you"
+    'such u bitch about everything',
+    'what a you freak out there',
+    // Swearing at a person: the illness names them, or starts a new sentence
+    'fuck off you freak',
+    'fuck you, cancer boy',
+    'Fuck you. Cancer is no excuse for being rude',
+    'fuck off ms smith',
+    "you're a cancer, fuck off",
+    'Fuck you cancer, you worthless idiot',
+    // More suffering, or a full stop or comma before the word that would ease it
+    'I hope she suffers more',
+    'I hope you suffer no less',
+    'I hope you suffer, no more excuses',
+    'you deserve to suffer. Less talk from you',
   ])('still holds %j', (text) => {
     expect(held(text)).toMatchObject({ action: 'hold', categories: ['harassment'] })
   })
@@ -244,6 +289,8 @@ describe('moderate — crisis language', () => {
     'I keep hurting myself',
     'they would be better off without me',
     'I don’t want to wake up tomorrow',
+    "I don't want to wake up at 5am or ever again",
+    "I don't want to wake up at 6 a.m. ever again",
     'I can’t go on',
     'I wish I was dead',
     'kms',
@@ -353,6 +400,75 @@ describe('moderate — crisis language', () => {
     'v qbag jnag gb yvir arkg lrne',
   ].map(rot13))('%j is crisis', (text) => {
     expect(held(text)).toMatchObject({ action: 'hold', crisis: true })
+    expect(held(text, 'private').crisis).toBe(true)
+  })
+
+  // A fear of dying, or a family saying where someone hopes to be at the end,
+  // is held as crisis too. Told apart by pattern, too many crisis lines went
+  // through with them (a refusal that turns back, a goodbye, a plan), and a
+  // line held for a moderator with resources shown is the safer mistake
+  // (ROT13 as above)
+  it.each([
+    'v qbag jnag gb qvr lrg gur xvqf ner fb lbhat',
+    'fur qbrfag jnag gb qvr va ubfcvgny',
+    'ur qvqag jnag gb qvr va n ubfcvpr',
+    'abg jnagvat gb qvr vf abezny',
+    'qnq jnagf gb qvr ng ubzr',
+    'tena jnagrq gb qvr crnprshyyl ng ubzr',
+    'zhz jnagf gb qvr va ure bja orq',
+    'zhz jnagf gb qvr va gur ubfcvpr',
+    'zbfg crbcyr jnag gb qvr ng ubzr',
+    'ur jnagf gb qvr jvgu qvtavgl',
+    'zl fvfgre fnlf fur jnagf gb qvr va ure fyrrc',
+    'v jnag gb qvr crnprshyyl',
+  ].map(rot13))('%j is crisis', (text) => {
+    expect(held(text)).toMatchObject({ action: 'hold', crisis: true, categories: ['selfHarm'] })
+    expect(held(text, 'private').crisis).toBe(true)
+  })
+
+  // Whatever is said around it (built from parts, the verb in ROT13 as above)
+  const DIE = rot13('qvr')
+  it.each([
+    ["I am scared. I don't want to", ' yet, the kids are so young'],
+    ["I don't want to", ". I'm terrified."],
+    ["I don't want to", ', but I will'],
+    ["I don't want to", ', but if I do I want to be at home'],
+    ["I don't want to", ' more than anything'],
+    ["I don't want to", '. Did anyone else feel like this after diagnosis?'],
+    ["I don't want to", ". I'm 42 with two kids."],
+    ["I don't want to", '. Not yet anyway.'],
+    ["Mum doesn't want to", ' in hospital. She wants to be at home.'],
+    ["Mum didn't want to", '. But she did.'],
+    ["She didn't want to", " alone, and she wasn't. We were all there."],
+    ["She's always wanted to", ' in her own bed'],
+    ['Mum and Dad both want to', ' at the hospice'],
+    ['Gran wanted to', ' at home and she did, peacefully.'],
+    ['Dad wants to', ' at home. The nurses are setting up a bed downstairs.'],
+    [
+      'Hi everyone. Dad was moved to the hospice yesterday. He wants to',
+      " at home but the doctors say he's too unwell to move. I'm heartbroken. Thank you all for being here.",
+    ],
+  ])('%j … %j is crisis', (head, tail) => {
+    expect(held(`${head} ${DIE}${tail}`)).toMatchObject({ action: 'hold', crisis: true, categories: ['selfHarm'] })
+    expect(held(`${head} ${DIE}${tail}`, 'private').crisis).toBe(true)
+  })
+
+  // A bare abbreviation is not a distance, even with "a day" after it, and nor
+  // is one after "gonna" or "one", or a counted one with no distance after it
+  // (ROT13 as above)
+  it.each([
+    'tbaan xzf',
+    'v guvax nobhg xzf n qnl abj',
+    'ab bar xzf',
+    'whfg bar xzf',
+    'unq fb znal xzf gubhtugf',
+    'n srj xzf hetrf ea',
+    'ubj znal xzf nggrzcgf',
+    'unq gjb xzf gubhtugf gbavtug',
+    'ybgf bs xzf yby',
+    'n srj xzf',
+  ].map(rot13))('%j is crisis', (text) => {
+    expect(held(text)).toMatchObject({ action: 'hold', crisis: true, categories: ['selfHarm'] })
     expect(held(text, 'private').crisis).toBe(true)
   })
 
@@ -681,6 +797,32 @@ describe('moderate — links', () => {
     expect(held(text, 'private').action).toBe('publish')
   })
 
+  // So did a dash, an emoji or an ideographic comma with no space before it
+  it.each([
+    'Please call them—www.samaritans.org—they helped me',
+    'see https://www.nhs.uk–it helped',
+    'see www.samaritans.org\u{1F64F}',
+    'see www.samaritans.org\u2764\uFE0F thank you',
+    'see www.nhs.uk、',
+    'I called www.samaritans.org—amazing.',
+  ])('publishes a support link followed by a dash or an emoji: %j', (text) => {
+    expect(held(text).action).toBe('publish')
+    expect(held(text, 'private').action).toBe('publish')
+  })
+
+  // Unless what follows could still take a browser to another host
+  it.each([
+    'https://evil.com—x',
+    'see https://evil.com\u{1F64F} now',
+    'see https://www.nhs.uk—.evil.page/login',
+    'see https://www.nhs.uk\u{1F64F}.evil.me',
+    'see https://www.nhs.uk—x@1249763466',
+    'see https://www.nhs.uk—x%2eevil%2ecom',
+  ])('still holds other links followed by a dash or an emoji: %j', (text) => {
+    expect(held(text).categories).toContain('spam')
+    expect(held(text, 'private').categories).toContain('spam')
+  })
+
   it('publishes a support link in quotes', () => {
     expect(held('"https://www.nhs.uk"').action).toBe('publish')
     expect(held('“https://www.macmillan.org.uk”').action).toBe('publish')
@@ -699,12 +841,28 @@ describe('moderate — links', () => {
     const result = held(`${rot13('v jnag gb qvr')}. I called https://www.samaritans.org, they were kind`, 'private')
     expect(result.categories).toEqual(['selfHarm'])
   })
+
+  it.each(['—they were kind', '\u{1F64F} they were kind'])(
+    'reads a crisis note with a support link and %j as crisis only',
+    (after) => {
+      const result = held(`${rot13('v jnag gb qvr')}. I called www.samaritans.org${after}`, 'private')
+      expect(result.categories).toEqual(['selfHarm'])
+    },
+  )
 })
 
 describe('moderate — personal info', () => {
   it('holds emails and phone numbers in groups', () => {
     expect(held('write me at quiet.heron@example.com').categories).toContain('personalInfo')
     expect(held('call me 555-123-4567').categories).toContain('personalInfo')
+  })
+
+  // A moderator sees the address as it was written, without what came before it
+  it('reports the address alone', () => {
+    expect(held('write me at quiet.heron@example.com').matches).toEqual([
+      { category: 'personalInfo', term: 'quiet.heron@example.com' },
+    ])
+    expect(held('(email:fern@example.test)').matches).toEqual([{ category: 'personalInfo', term: 'fern@example.test' }])
   })
 
   it('allows them in private messages', () => {
@@ -817,6 +975,24 @@ describe('moderate — flooding', () => {
     expect(held(`Morning meds:${' '.repeat(21)}2 tablets`, 'private').action).toBe('publish')
     expect(held(`a${'\t'.repeat(20)}b`, 'private').action).toBe('publish')
     expect(held(`a${'\u00a0'.repeat(20)}b`, 'private').action).toBe('publish')
+  })
+
+  // Swearing at the illness was tried from each line break in a run of blank
+  // lines, with time growing with the square of its length (seconds at this
+  // size), and the Composer checks every keystroke
+  it.each([
+    ['line breaks', '\n'.repeat(40000)],
+    ['Windows line breaks', '\r\n'.repeat(20000)],
+  ])('reads a long run of blank %s quickly', (_, blank) => {
+    const start = performance.now()
+    expect(held(`x${blank}`, 'private').action).toBe('publish')
+    expect(performance.now() - start).toBeLessThan(1000)
+  })
+
+  it('still reads swearing at the illness after blank lines', () => {
+    expect(held('Scan clear today.\n\n\nCancer, fuck off!').action).toBe('publish')
+    expect(held('Scan clear today.\n\n  \n  cancer, fuck you').action).toBe('publish')
+    expect(held('Scan clear today.\r\n\r\nDear cancer, fuck you.').action).toBe('publish')
   })
 })
 
@@ -1017,6 +1193,34 @@ describe('pen names', () => {
     [`Big ${rot13('ergneq')}`, 'unkind'],
   ])('%j → %s', (name, problem) => {
     expect(checkPenName(name)).toEqual({ ok: false, problem })
+  })
+
+  // A name that holds crisis language is still refused, but as its own problem,
+  // so the form can show resources instead of "choose a different name". Read
+  // before the characters, which an emoticon or a full stop would stop at.
+  it.each([rot13('v jnag gb qvr'), rot13('xzf'), `${rot13('v pnag tb ba')}...`, `${rot13('fhvpvqny')} :(`])(
+    '%j → crisis',
+    (name) => {
+      expect(checkPenName(name)).toEqual({ ok: false, problem: 'crisis' })
+      expect(checkPenName(name, { chat: true })).toEqual({ ok: false, problem: 'crisis' })
+    },
+  )
+
+  // Up to the 40 characters the name fields take, so a longer phrase gets
+  // resources too. Past that, and for any other name over 32, it is the length.
+  it('reads crisis language in a name the field takes, even past 32 characters', () => {
+    const long = rot13('v whfg qbag jnag gb or nyvir nalzber')
+    expect(long.length).toBeGreaterThan(32)
+    expect(long.length).toBeLessThanOrEqual(40)
+    expect(checkPenName(long)).toEqual({ ok: false, problem: 'crisis' })
+    expect(checkPenName(long, { chat: true })).toEqual({ ok: false, problem: 'crisis' })
+    expect(checkPenName(`${long} and on`)).toEqual({ ok: false, problem: 'length' })
+    expect(checkPenName('Quiet Heron of the Long Grey River Bank')).toEqual({ ok: false, problem: 'length' })
+  })
+
+  it('still calls an unkind name unkind', () => {
+    expect(checkPenName(`Big ${rot13('ergneq')}`)).toEqual({ ok: false, problem: 'unkind' })
+    expect(checkPenName('Quiet Heron').ok).toBe(true)
   })
 
   // Reserved words only as whole words: these just hold one
