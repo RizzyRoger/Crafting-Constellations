@@ -1,6 +1,7 @@
 import { FieldValue } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
-import { db, PIGMENTS } from './app.js'
+import { auth, db, PIGMENTS } from './app.js'
+import { userOrNone } from './localBackendPolicy.js'
 import { checkPenName, moderate, suggestPenName, tidyPenName } from './moderation/index.js'
 import { callable } from './options.js'
 import { mayRelease } from './profilePolicy.js'
@@ -24,7 +25,11 @@ const pickFreeName = async () => {
 export const saveProfile = onCall<SaveProfileInput>(callable(), async (request) => {
   const uid = request.auth?.uid
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.')
-  if ((await db.doc(`bans/${uid}`).get()).exists) throw new HttpsError('permission-denied', 'This account is paused.')
+  const [ban, user] = await Promise.all([db.doc(`bans/${uid}`).get(), userOrNone(auth.getUser(uid))])
+  if (ban.exists) throw new HttpsError('permission-denied', 'This account is paused.')
+  // A token outlives the account it was made for, up to an hour: ask Auth, as the local backend
+  // does, so a tab left open after deleting the account can't make it a profile again
+  if (!user || user.disabled) throw new HttpsError('unauthenticated', 'Sign in first.')
 
   const input = request.data ?? {}
   const userRef = db.doc(`users/${uid}`)

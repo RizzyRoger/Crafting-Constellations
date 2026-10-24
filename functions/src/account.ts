@@ -1,6 +1,6 @@
 import { FieldValue, type DocumentReference, type Query } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
-import { confirmMatches, isRecentSignIn, pairOfDmPath, underPath } from './accountPolicy.js'
+import { confirmMatches, isPairOf, isRecentSignIn, pairOfDmPath, underPath } from './accountPolicy.js'
 import { auth, db, logAction, storage } from './app.js'
 import { callable } from './options.js'
 
@@ -42,8 +42,9 @@ export const purgeAccount = async (uid: string) => {
   const posts = await refsOf(db.collectionGroup('posts').where('authorUid', '==', uid))
   await deleteTrees(posts)
 
-  // 3. Private threads, both sides. Their own lines also find threads that have no thread doc yet.
-  const [comments, messages, likes, reports, queued, pings] = await Promise.all([
+  // 3. Private threads, both sides. Their own lines also find threads that have no thread doc yet, and
+  // the list of threads (which names those too) finds one holding only the other person's undelivered lines
+  const [comments, messages, likes, reports, queued, pings, threadIds] = await Promise.all([
     refsOf(db.collectionGroup('comments').where('authorUid', '==', uid)),
     refsOf(db.collectionGroup('messages').where('authorUid', '==', uid)),
     refsOf(db.collectionGroup('likes').where('uid', '==', uid)),
@@ -51,12 +52,14 @@ export const purgeAccount = async (uid: string) => {
     refsOf(db.collection('modQueue').where('authorUid', '==', uid)),
     // Mentions, comments and acceptances they caused in other people's notifications
     refsOf(db.collectionGroup('notices').where('actorUid', '==', uid)),
+    db.collection('dms').listDocuments(),
   ])
   const pairs = [
     ...new Set([
       ...connections.map((ref) => ref.id),
       ...threadDocs.map((ref) => ref.id),
       ...messages.map((ref) => pairOfDmPath(ref.path)).filter((pair): pair is string => pair !== undefined),
+      ...threadIds.map((ref) => ref.id).filter((pair) => isPairOf(pair, uid)),
     ]),
   ]
   const threads = await deleteTrees(pairs.map((pair) => db.doc(`dms/${pair}`)))
@@ -113,6 +116,9 @@ export const deleteAccount = onCall<{ confirm?: string }>(
     await auth.deleteUser(uid).catch((error: { code?: string }) => {
       if (error.code !== 'auth/user-not-found') throw error
     })
+    // Once the profile goes, a tab left open is sent to choose a pen name, and while Auth still knew
+    // them saveProfile let it. Nothing can now (it asks Auth), so whatever that let them do goes too
+    if ((await db.doc(`users/${uid}`).get()).exists) await purgeAccount(uid)
     await logAction(uid, 'deleteAccount', uid, counts)
     return { ok: true }
   },

@@ -1,7 +1,7 @@
 import { FieldValue, type DocumentData, type DocumentReference } from 'firebase-admin/firestore'
 import { onDocumentCreated } from 'firebase-functions/v2/firestore'
 import { db, kindOf, NOT_FOUND, queueIdFor } from './app.js'
-import { holds, nextRound } from './reportPolicy.js'
+import { holds, nameable, nextRound } from './reportPolicy.js'
 
 const couldSee = async (path: string, uid: string) => {
   const s = path.split('/')
@@ -21,7 +21,7 @@ export const handleReport = async (report: DocumentData | undefined) => {
   if (!report) return
   const path: string = report.contentPath
   const kind = kindOf(path)
-  if (!kind) return
+  if (!kind || !nameable(path)) return
 
   const contentRef = db.doc(path)
   const content = (await contentRef.get()).data()

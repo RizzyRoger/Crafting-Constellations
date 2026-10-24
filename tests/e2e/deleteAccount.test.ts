@@ -1,6 +1,8 @@
 /*
  * deleteAccount end to end: the real function and triggers on the emulators.
  * Also a moderator's Reset profile, whose retired name has to outlast the account.
+ * A tab left open is played by the handlers themselves, run in this process as the
+ * local backend runs them (built JS: npm run functions:build).
  * Run with `npm run test:e2e` (stop `npm run emulators` first).
  *
  * Every test seeds its own people, group and thread under fresh ids instead of
@@ -9,12 +11,12 @@
  */
 import { deleteApp as deleteAdminApp, initializeApp as initializeAdminApp } from 'firebase-admin/app'
 import { getAuth as getAdminAuth } from 'firebase-admin/auth'
-import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore'
+import { getFirestore as getAdminFirestore, type Firestore } from 'firebase-admin/firestore'
 import { getStorage as getAdminStorage } from 'firebase-admin/storage'
 import { deleteApp, FirebaseError, initializeApp } from 'firebase/app'
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 const PROJECT_ID = 'demo-crafting-constellations'
 const BUCKET = `${PROJECT_ID}.appspot.com`
@@ -32,6 +34,22 @@ const deleteAccount = httpsCallable<{ confirm?: string }, { ok: true }>(function
 const saveProfile = httpsCallable<{ penName?: string }, { ok: true }>(functions, 'saveProfile')
 const removeContent = httpsCallable<{ queueId: string }, { ok: true }>(functions, 'removeContent')
 const approveContent = httpsCallable<{ queueId: string }, { ok: true }>(functions, 'approveContent')
+const banUser = httpsCallable<{ uid: string; reason: string }, { ok: true }>(functions, 'banUser')
+const unbanUser = httpsCallable<{ uid: string }, { ok: true }>(functions, 'unbanUser')
+
+// The handlers, in this process. Through the emulator a stale tab can't be played: its token
+// check asks Auth whether the account is still there, which Cloud Functions' doesn't
+interface Handler {
+  run: (request: unknown) => Promise<unknown>
+}
+let handlers: { db: Firestore; saveProfile: Handler; deleteAccount: Handler }
+
+// A request from the leaver's tab, signed in just now (deleting needs a recent sign-in)
+const fromTab = (uid: string, data: Record<string, unknown>) => ({
+  data,
+  auth: { uid, token: { uid, email_verified: true, auth_time: Math.floor(Date.now() / 1000) }, rawToken: '' },
+  acceptsStreaming: false,
+})
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -158,6 +176,18 @@ beforeAll(async () => {
     throw new Error('Run with npm run test:e2e (inside the emulators).')
   }
   await connectClient()
+  process.env.GCLOUD_PROJECT ??= PROJECT_ID
+  // @ts-expect-error built JS from the functions package (npm run functions:build)
+  const { db: handlerDb } = await import('../../functions/lib/app.js')
+  // @ts-expect-error built JS from the functions package (npm run functions:build)
+  const { saveProfile } = await import('../../functions/lib/profile.js')
+  // @ts-expect-error built JS from the functions package (npm run functions:build)
+  const { deleteAccount: deleteAccountHandler } = await import('../../functions/lib/account.js')
+  handlers = { db: handlerDb, saveProfile, deleteAccount: deleteAccountHandler }
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 afterAll(async () => {
@@ -261,6 +291,65 @@ describe('deleteAccount', () => {
     expect(audit.docs.map((d) => d.data())).toEqual([
       expect.objectContaining({ actorUid: leaver, action: 'deleteAccount', details: { posts: 1, threads: 1, items: expect.any(Number) } }),
     ])
+  })
+
+  // The other person's notes are all there is in the thread, and none went out: one held for review,
+  // one that came after the two disconnected. No connection, no thread doc, nothing from the leaver
+  it('removes a private thread where only the other person wrote and nothing was delivered', async () => {
+    const w = await seed()
+    const other = `other-${w.n}`
+    await person(other, `Other Wren ${w.n}`)
+    const pair = [other, w.leaver].sort().join('_')
+    const held = `dms/${pair}/messages/h`
+    const undelivered = `dms/${pair}/messages/u`
+    await db.doc(held).set({ authorUid: other, text: 'Are you there?', status: 'held', heldReason: 'review', createdAt: new Date() })
+    await db.doc(undelivered).set({ authorUid: other, text: 'Thinking of you.', status: 'held', undelivered: true, createdAt: new Date() })
+    await db.doc(queueDoc(held)).set({ contentPath: held, kind: 'dm', pairId: pair, authorUid: other, state: 'open' })
+
+    await signInAs(w.leaver)
+    await expect(deleteAccount({ confirm: w.leaverName })).resolves.toMatchObject({ data: { ok: true } })
+    for (const path of [held, undelivered, queueDoc(held)]) expect(await exists(path), path).toBe(false)
+    expect(await exists(`users/${other}`)).toBe(true)
+  })
+
+  it('turns away a pen name from a tab still signed in once the account is gone', async () => {
+    const w = await seed()
+    await signInAs(w.leaver)
+    await expect(deleteAccount({ confirm: w.leaverName })).resolves.toMatchObject({ data: { ok: true } })
+
+    // The tab's token is still good for up to an hour, and its page asks for a pen name
+    await expect(handlers.saveProfile.run(fromTab(w.leaver, { penName: `Quiet Fern ${w.n}` }))).rejects.toMatchObject({ code: 'unauthenticated' })
+    expect(await exists(`users/${w.leaver}`)).toBe(false)
+    expect(await exists(`penNames/quiet fern ${w.n}`)).toBe(false)
+  })
+
+  it('takes away a profile a tab left open made while the purge ran', async () => {
+    const w = await seed()
+    const recursiveDelete = handlers.db.recursiveDelete.bind(handlers.db)
+    let saved: unknown
+    // The purge's first tree is the profile. Once it's gone, the other tab is sent to choose a pen
+    // name, and saves the one it was given while the account is still there
+    vi.spyOn(handlers.db, 'recursiveDelete').mockImplementationOnce(async (ref, writer) => {
+      await recursiveDelete(ref, writer)
+      saved = await handlers.saveProfile.run(fromTab(w.leaver, { penName: `Quiet Fern ${w.n}` }))
+    })
+
+    await expect(handlers.deleteAccount.run(fromTab(w.leaver, { confirm: w.leaverName }))).resolves.toMatchObject({ ok: true })
+    expect(saved).toMatchObject({ ok: true })
+    expect(await exists(`users/${w.leaver}`)).toBe(false)
+    expect(await exists(`penNames/quiet fern ${w.n}`)).toBe(false)
+    await expect(adminAuth.getUser(w.leaver)).rejects.toMatchObject({ code: 'auth/user-not-found' })
+  })
+
+  // Between the purge's first step and its last a moderator may still act on them
+  it('leaves no profile behind when a moderator bans and unbans someone whose profile is gone', async () => {
+    const w = await seed()
+    await db.doc(`users/${w.leaver}`).delete()
+    await signInAs(w.mod)
+    await expect(banUser({ uid: w.leaver, reason: 'test' })).resolves.toMatchObject({ data: { ok: true } })
+    expect(await exists(`users/${w.leaver}`)).toBe(false)
+    await expect(unbanUser({ uid: w.leaver })).resolves.toMatchObject({ data: { ok: true } })
+    expect(await exists(`users/${w.leaver}`)).toBe(false)
   })
 
   it('accepts the word "delete" from someone who never chose a pen name', async () => {

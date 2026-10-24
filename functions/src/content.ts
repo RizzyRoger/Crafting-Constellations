@@ -1,7 +1,7 @@
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore'
 import { onDocumentCreated } from 'firebase-functions/v2/firestore'
 import { db, kindOf, queueIdFor, snapshotOf, textOf, type ContentKind } from './app.js'
-import { applyFlood } from './moderation/flood.js'
+import { judgePace } from './moderation/flood.js'
 import { moderate } from './moderation/index.js'
 import { applyNotices, NO_NOTICES, planNotices } from './notify.js'
 
@@ -37,7 +37,9 @@ export const handleNewContent = async (ref: DocumentReference) => {
     // Paced by when it was written (createdAt is the server's time, held by the rules), so a
     // backlog the local backend catches up on after downtime isn't taken for a burst
     const writtenAt: number = data.createdAt?.toMillis?.() ?? Date.now()
-    const { flooded, stamps } = applyFlood(rateSnap.data()?.stamps, writtenAt)
+    const text = textOf(data)
+    // Talk and replies are paced as texting, posts more slowly, each in its own log
+    const paced = judgePace(kind, rateSnap.data(), { writtenAt, place: ref.parent.path, text })
 
     if (banSnap.exists || !userSnap.exists) {
       tx.update(ref, { status: 'removed', removedBy: 'automod', removedAt: now })
@@ -46,13 +48,13 @@ export const handleNewContent = async (ref: DocumentReference) => {
 
     const author = snapshotOf(authorUid, userSnap.data())
 
-    const text = textOf(data)
     const privateThread = kind === 'dm' || kind === 'chatMessage'
     const verdict = moderate(text, { context: privateThread ? 'private' : 'public' })
-    const floodHold = flooded && verdict.action === 'publish' && !verdict.crisis
+    const floodHold = (paced.flooded || paced.repeated) && verdict.action === 'publish' && !verdict.crisis
     const action = floodHold ? 'hold' : verdict.action
     const categories = floodHold ? [...verdict.categories, 'spam'] : verdict.categories
-    const matches = floodHold ? [...verdict.matches, { category: 'spam' as const, term: 'too many notes' }] : verdict.matches
+    const floodTerm = paced.flooded ? 'too many notes' : 'the same note again'
+    const matches = floodHold ? [...verdict.matches, { category: 'spam' as const, term: floodTerm }] : verdict.matches
     const crisisOnly = verdict.crisis && verdict.categories.every((c) => c === 'selfHarm')
     // A note was written while the two were connected, but may have waited since (the backend
     // off, a retry): as with Approve, it goes out only while they still are. A chat line still
@@ -60,9 +62,10 @@ export const handleNewContent = async (ref: DocumentReference) => {
     const reachable = !pairId || connection?.data()?.status === 'accepted'
     const deliver = reachable && (action === 'publish' || (privateThread && crisisOnly))
 
-    // Its reads go before any write (a transaction rule), so the stamps are set after
+    // Its reads go before any write (a transaction rule), so the logs are set after, merged to
+    // keep the other pace's
     const notices = deliver ? await planNotices(tx, ref.path, data, author) : NO_NOTICES
-    tx.set(rateRef, { stamps, updatedAt: now })
+    tx.set(rateRef, { ...paced.logs, updatedAt: now }, { merge: true })
 
     if (deliver) {
       tx.update(ref, {

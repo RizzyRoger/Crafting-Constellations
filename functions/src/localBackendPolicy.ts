@@ -2,12 +2,23 @@ import { acceptedWhileAway } from './notifyPolicy.js'
 
 // Firebase-free rules for the local backend, kept apart so they can be unit tested
 
+// What the backend last saw of a connection: its status, and when that was set
+export interface SeenConnection {
+  status: string
+  updatedAtMs: number | undefined
+}
+
 // A connection's status before a change, as far as the accepted notice goes. Snapshots carry
-// no "before", so the backend remembers what it saw. One it never saw that is already accepted
-// was asked and answered while it wasn't watching (off, or a listener reconnecting): if that
-// was recent, it counts as pending, so the acceptance is still announced.
-export const statusBefore = (seen: string | undefined, status: unknown, acceptedAtMs: number | undefined, nowMs: number) =>
-  seen ?? (acceptedWhileAway(status, acceptedAtMs, nowMs) ? 'pending' : undefined)
+// no "before", so the backend remembers what it saw. An acceptance it never saw asked was asked
+// and answered while it wasn't watching (off, or a listener reconnecting): on a connection it
+// never saw, or one it last saw blocked or accepted at another time (the two parted and one asked
+// again, as the rules only make 'accepted' from a request). If that was recent, it counts as
+// pending, so the acceptance is still announced.
+export const statusBefore = (seen: SeenConnection | undefined, status: unknown, acceptedAtMs: number | undefined, nowMs: number) => {
+  // Seen asked, or this same acceptance seen again
+  if (status !== 'accepted' || seen?.status === 'pending' || (seen?.status === 'accepted' && seen.updatedAtMs === acceptedAtMs)) return seen?.status
+  return acceptedWhileAway(status, acceptedAtMs, nowMs) ? 'pending' : seen?.status
+}
 
 // The Firebase CLI hands list params to functions as JSON, and an unset one as its declared
 // default (ADMIN_EMAILS: []); .env files hold them comma-separated

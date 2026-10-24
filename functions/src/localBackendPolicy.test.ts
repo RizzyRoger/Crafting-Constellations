@@ -5,10 +5,15 @@ import { MISSED_ACCEPT_MS } from './notifyPolicy.js'
 describe('statusBefore', () => {
   const now = 1_000_000_000_000
 
-  it('is the status the backend saw, whenever it saw one', () => {
-    expect(statusBefore('pending', 'accepted', now - 1000, now)).toBe('pending')
+  const seen = (status: string, updatedAtMs?: number) => ({ status, updatedAtMs })
+
+  it('is the status the backend saw asked, or the acceptance it saw', () => {
+    expect(statusBefore(seen('pending', now - 60_000), 'accepted', now - 1000, now)).toBe('pending')
     // The same acceptance delivered again: no second notice
-    expect(statusBefore('accepted', 'accepted', now - 1000, now)).toBe('accepted')
+    expect(statusBefore(seen('accepted', now - 1000), 'accepted', now - 1000, now)).toBe('accepted')
+    expect(statusBefore(seen('accepted'), 'accepted', undefined, now)).toBe('accepted')
+    expect(statusBefore(seen('accepted', now - 1000), 'blocked', now, now)).toBe('accepted')
+    expect(statusBefore(seen('pending', now - 1000), 'pending', now - 1000, now)).toBe('pending')
   })
 
   it('counts a recent acceptance it never saw asked as pending', () => {
@@ -16,11 +21,19 @@ describe('statusBefore', () => {
     expect(statusBefore(undefined, 'accepted', now, now)).toBe('pending')
   })
 
+  it('counts a recent acceptance other than the one it saw as pending: the two parted and were asked and accepted again', () => {
+    expect(statusBefore(seen('accepted', now - 10 * 60_000), 'accepted', now - 1000, now)).toBe('pending')
+    // Unblocked, asked and accepted again
+    expect(statusBefore(seen('blocked', now - 10 * 60_000), 'accepted', now - 1000, now)).toBe('pending')
+  })
+
   it('leaves new requests, old acceptances and undated ones be', () => {
     expect(statusBefore(undefined, 'pending', now - 60_000, now)).toBeUndefined()
     expect(statusBefore(undefined, 'accepted', now - MISSED_ACCEPT_MS - 1, now)).toBeUndefined()
     expect(statusBefore(undefined, 'accepted', undefined, now)).toBeUndefined()
     expect(statusBefore(undefined, undefined, undefined, now)).toBeUndefined()
+    expect(statusBefore(seen('accepted', now - MISSED_ACCEPT_MS - 60_000), 'accepted', now - MISSED_ACCEPT_MS - 1, now)).toBe('accepted')
+    expect(statusBefore(seen('accepted', now - 60_000), 'accepted', undefined, now)).toBe('accepted')
   })
 })
 

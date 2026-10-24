@@ -1,5 +1,6 @@
 /*
- * reviewProfessional end to end: the real function on the emulators.
+ * reviewProfessional end to end: the real function on the emulators. Also a moderator's
+ * own case in the review queue, which another moderator decides, as with a licence.
  * Run inside `firebase emulators:exec --only auth,firestore,functions,storage`
  * (as npm run test:e2e does), naming this file.
  *
@@ -23,25 +24,30 @@ const adminAuth = getAdminAuth(admin)
 const client = initializeApp({ apiKey: 'demo-key', projectId: PROJECT_ID, authDomain: `${PROJECT_ID}.firebaseapp.com` }, 'review-pro-client')
 const auth = getAuth(client)
 const functions = getFunctions(client, 'us-central1')
-const reviewProfessional = httpsCallable<{ uid: string; decision: 'approve' | 'deny' | 'revoke'; note?: string }, { ok: true }>(
+const reviewProfessional = httpsCallable<{ uid: string; decision: 'approve' | 'deny' | 'revoke'; note?: string }, { ok: true; outcome?: string }>(
   functions,
   'reviewProfessional',
 )
 const approveContent = httpsCallable<{ queueId: string }, { ok: true; outcome: string }>(functions, 'approveContent')
+const removeContent = httpsCallable<{ queueId: string; note?: string }, { ok: true; outcome: string }>(functions, 'removeContent')
 
 const exists = async (path: string) => (await db.doc(path).get()).exists
 const field = async (path: string, name: string) => (await db.doc(path).get()).get(name)
 const claims = async (uid: string) => (await adminAuth.getUser(uid)).customClaims ?? {}
 const queueId = (path: string) => path.replaceAll('/', '~')
+const notices = async (uid: string) => (await db.collection(`users/${uid}/notices`).get()).docs.map((d) => d.get('type'))
 
-const codeOf = async (attempt: Promise<unknown>) => {
+const refusalOf = async (attempt: Promise<unknown>) => {
   const error = await attempt.then(
     () => undefined,
     (e: unknown) => e,
   )
   expect(error).toBeInstanceOf(FirebaseError)
-  return (error as FirebaseError).code
+  const { code, details } = error as FirebaseError & { details?: { problem?: string } }
+  return { code, problem: details?.problem }
 }
+
+const codeOf = async (attempt: Promise<unknown>) => (await refusalOf(attempt)).code
 
 let runs = 0
 
@@ -62,6 +68,9 @@ const asModerator = async () => {
   await signInWithEmailAndPassword(auth, `${mod}@example.test`, PASSWORD)
   return n
 }
+
+// Someone's licence application, waiting for a moderator
+const applied = (uid: string) => db.doc(`proApplications/${uid}`).set({ uid, status: 'submitted', legalName: 'Test Person', files: ['doc-1'], submittedAt: new Date() })
 
 beforeAll(async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST || !process.env.FIREBASE_AUTH_EMULATOR_HOST || !process.env.FIREBASE_EMULATOR_HUB) {
@@ -122,6 +131,149 @@ describe('reviewProfessional', () => {
     expect(await codeOf(reviewProfessional({ uid: someone, decision: 'revoke' }))).toBe('functions/not-found')
     expect(await exists(`users/${someone}`)).toBe(false)
     expect(await claims(someone)).not.toHaveProperty('pro')
+  })
+
+  // Account deletion takes the profile first and the application last, so for a while there is an
+  // application, an account and no profile
+  it('decides nothing for someone whose account is being deleted, and makes them no profile', async () => {
+    const n = await asModerator()
+    const leaving = `leaving-applicant-${n}`
+    await person(leaving, { profile: false })
+    await applied(leaving)
+
+    expect(await codeOf(reviewProfessional({ uid: leaving, decision: 'approve' }))).toBe('functions/not-found')
+    expect(await codeOf(reviewProfessional({ uid: leaving, decision: 'deny' }))).toBe('functions/not-found')
+    expect(await exists(`users/${leaving}`)).toBe(false)
+    expect(await notices(leaving)).toEqual([])
+    expect(await claims(leaving)).not.toHaveProperty('pro')
+    expect(await field(`proApplications/${leaving}`, 'status')).toBe('submitted')
+  })
+
+  it('takes the mark from a profile its account outlived', async () => {
+    const n = await asModerator()
+    const gone = `gone-pro-${n}`
+    await db.doc(`users/${gone}`).set({ pro: true, proSince: new Date(), updatedAt: new Date() })
+
+    await expect(reviewProfessional({ uid: gone, decision: 'revoke' })).resolves.toMatchObject({ data: { ok: true } })
+    expect(await field(`users/${gone}`, 'pro')).toBe(false)
+  })
+})
+
+describe('a decision made twice', () => {
+  it('approves once: a deny pressed after it on a stale row changes nothing', async () => {
+    const n = await asModerator()
+    const applicant = `twice-applicant-${n}`
+    await person(applicant)
+    await applied(applicant)
+
+    await expect(reviewProfessional({ uid: applicant, decision: 'approve' })).resolves.toMatchObject({ data: { ok: true } })
+    const reviewedAt = await field(`proApplications/${applicant}`, 'reviewedAt')
+    await expect(reviewProfessional({ uid: applicant, decision: 'deny', note: 'Too late' })).resolves.toMatchObject({ data: { ok: true, outcome: 'already-resolved' } })
+
+    expect(await field(`proApplications/${applicant}`, 'status')).toBe('approved')
+    expect(await field(`proApplications/${applicant}`, 'reviewedAt')).toEqual(reviewedAt)
+    expect(await field(`users/${applicant}`, 'pro')).toBe(true)
+    expect(await claims(applicant)).toMatchObject({ pro: true })
+    expect(await notices(applicant)).toEqual(['proApproved'])
+  })
+
+  it('decides once when two moderators press at the same moment, and everything agrees', async () => {
+    const n = await asModerator()
+    const applicant = `race-applicant-${n}`
+    await person(applicant)
+    await applied(applicant)
+
+    const answers = await Promise.all([
+      reviewProfessional({ uid: applicant, decision: 'approve' }),
+      reviewProfessional({ uid: applicant, decision: 'deny' }),
+    ])
+    const outcomes = answers.map((answer) => answer.data.outcome)
+    expect(outcomes.filter((outcome) => outcome === 'already-resolved')).toHaveLength(1)
+
+    const pro = outcomes[0] === undefined
+    expect(await field(`proApplications/${applicant}`, 'status')).toBe(pro ? 'approved' : 'denied')
+    expect(await field(`users/${applicant}`, 'pro')).toBe(pro)
+    expect((await claims(applicant)).pro).toBe(pro)
+    expect(await notices(applicant)).toEqual([pro ? 'proApproved' : 'proDenied'])
+  })
+
+  it('revokes once, and leaves the reapplication round where the first revoke put it', async () => {
+    const n = await asModerator()
+    const pro = `revoked-twice-${n}`
+    await person(pro, { claims: { pro: true }, profile: { pro: true } })
+    await db.doc(`proApplications/${pro}`).set({ uid: pro, status: 'approved', legalName: 'Test Person', files: ['doc-1'] })
+
+    await expect(reviewProfessional({ uid: pro, decision: 'revoke' })).resolves.toMatchObject({ data: { ok: true } })
+    const reviewedAt = await field(`proApplications/${pro}`, 'reviewedAt')
+    await expect(reviewProfessional({ uid: pro, decision: 'revoke' })).resolves.toMatchObject({ data: { ok: true, outcome: 'already-resolved' } })
+    expect(await field(`proApplications/${pro}`, 'reviewedAt')).toEqual(reviewedAt)
+    expect(await field(`users/${pro}`, 'pro')).toBe(false)
+  })
+})
+
+describe('a moderator’s own case', () => {
+  const self = { code: 'functions/permission-denied', problem: 'self' }
+
+  it('leaves their own licence application to another moderator', async () => {
+    const n = await asModerator()
+    const mod = `review-mod-${n}`
+    await applied(mod)
+
+    expect(await refusalOf(reviewProfessional({ uid: mod, decision: 'approve' }))).toEqual(self)
+    expect(await refusalOf(reviewProfessional({ uid: mod, decision: 'deny' }))).toEqual(self)
+    expect(await field(`proApplications/${mod}`, 'status')).toBe('submitted')
+    expect(await field(`users/${mod}`, 'pro')).toBe(false)
+    expect(await notices(mod)).toEqual([])
+
+    // Another moderator can
+    await asModerator()
+    await expect(reviewProfessional({ uid: mod, decision: 'approve' })).resolves.toMatchObject({ data: { ok: true } })
+    expect(await field(`users/${mod}`, 'pro')).toBe(true)
+    expect(await claims(mod)).toMatchObject({ admin: true, pro: true })
+  })
+
+  it('still lets them take their own mark away', async () => {
+    const n = await asModerator()
+    const mod = `review-mod-${n}`
+    await adminAuth.setCustomUserClaims(mod, { admin: true, pro: true })
+    await db.doc(`users/${mod}`).update({ pro: true })
+
+    await expect(reviewProfessional({ uid: mod, decision: 'revoke' })).resolves.toMatchObject({ data: { ok: true } })
+    expect(await field(`users/${mod}`, 'pro')).toBe(false)
+    expect(await claims(mod)).toMatchObject({ admin: true, pro: false })
+  })
+
+  // A moderator's post that three people reported, hidden for review; and their profile, reported
+  const reportedModerator = async () => {
+    const n = await asModerator()
+    const mod = `review-mod-${n}`
+    const g = `groups/own-${n}`
+    const post = `${g}/posts/p`
+    await db.doc(g).set({ name: 'Evening sheet', memberCount: 0 })
+    await db.doc(post).set({ authorUid: mod, body: 'Call me any time.', status: 'held', heldReason: 'review', createdAt: new Date(), publishedAt: new Date() })
+    const reports = { count: 3, reporterUids: [`r1-${n}`, `r2-${n}`, `r3-${n}`], reasons: ['other'] }
+    await db.doc(`modQueue/${queueId(post)}`).set({ contentPath: post, kind: 'post', groupId: `own-${n}`, authorUid: mod, reports, state: 'open' })
+    await db.doc(`modQueue/${queueId(`users/${mod}`)}`).set({ contentPath: `users/${mod}`, kind: 'profile', authorUid: mod, authorPenName: mod, reports, state: 'open' })
+    return { mod, post }
+  }
+
+  it('leaves their own reported writing and profile to another moderator, open and as it is', async () => {
+    const { mod, post } = await reportedModerator()
+
+    for (const path of [post, `users/${mod}`]) {
+      expect(await refusalOf(approveContent({ queueId: queueId(path) })), path).toEqual(self)
+      expect(await refusalOf(removeContent({ queueId: queueId(path) })), path).toEqual(self)
+      expect(await field(`modQueue/${queueId(path)}`, 'state'), path).toBe('open')
+    }
+    expect(await field(post, 'status')).toBe('held')
+    expect(await field(`users/${mod}`, 'penName')).toBe(mod)
+    expect(await notices(mod)).toEqual([])
+
+    // Another moderator decides both
+    await asModerator()
+    await expect(approveContent({ queueId: queueId(post) })).resolves.toMatchObject({ data: { ok: true, outcome: 'restored' } })
+    expect(await field(post, 'status')).toBe('published')
+    await expect(approveContent({ queueId: queueId(`users/${mod}`) })).resolves.toMatchObject({ data: { ok: true, outcome: 'kept' } })
   })
 })
 

@@ -34,6 +34,9 @@ export const planNotices = async (tx: Transaction, path: string, data: DocumentD
     inChat ? tx.get(db.doc(`chats/${placeId}`)) : undefined,
     kind === 'comment' ? tx.get(db.doc(`groups/${placeId}/posts/${postId}`)) : undefined,
   ])
+  // A comment that waited (held, or the backend off) while its post was withdrawn, removed or
+  // hidden by reports pings no one: the link would open a page that can't show it
+  if (post && post.data()?.status !== 'published') return NO_NOTICES
   const postAuthorUid: string | undefined = post?.data()?.authorUid
   const uids = [...new Set([...requested, ...(postAuthorUid ? [postAuthorUid] : [])])].filter((uid) => uid !== authorUid)
   if (uids.length === 0) return NO_NOTICES

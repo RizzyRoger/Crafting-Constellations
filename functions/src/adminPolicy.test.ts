@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { approvalOf, crisisOnPublish, leftAsIs, MAX_NOTE, moderatorNote, outcomeOf, removalOf } from './adminPolicy.js'
+import { approvalOf, crisisOnPublish, leftAsIs, licenceOpen, MAX_NOTE, moderatorNote, outcomeOf, removalOf } from './adminPolicy.js'
 
 describe('approvalOf', () => {
   const at = { seconds: 1, nanoseconds: 0 }
@@ -110,6 +110,31 @@ describe('leftAsIs', () => {
     expect(leftAsIs('withdrawn')).toBe('withdrawn')
     expect(leftAsIs('removed')).toBe('gone')
     expect(leftAsIs(undefined)).toBe('gone')
+  })
+})
+
+describe('licenceOpen', () => {
+  it('approves or turns down only an application still waiting for a decision', () => {
+    for (const decision of ['approve', 'deny']) {
+      expect(licenceOpen(decision, 'submitted', false)).toBe(true)
+      // A seeded pro who applied is still waiting too
+      expect(licenceOpen(decision, 'submitted', true)).toBe(true)
+    }
+  })
+
+  it('leaves an application another moderator (or an earlier press) already decided', () => {
+    for (const decision of ['approve', 'deny']) {
+      for (const status of ['approved', 'denied', 'revoked', undefined]) expect(licenceOpen(decision, status, false), `${decision} ${status}`).toBe(false)
+    }
+  })
+
+  it('takes a mark away only while it is there, whatever the application says', () => {
+    expect(licenceOpen('revoke', 'approved', true)).toBe(true)
+    // Seeded and hand-set pros never applied
+    expect(licenceOpen('revoke', undefined, true)).toBe(true)
+    expect(licenceOpen('revoke', 'revoked', false)).toBe(false)
+    expect(licenceOpen('revoke', 'approved', false)).toBe(false)
+    expect(licenceOpen('revoke', undefined, undefined)).toBe(false)
   })
 })
 

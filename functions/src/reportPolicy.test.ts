@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { holds, nextRound, type Filed, type Queued, type Round } from './reportPolicy.js'
+import { holds, nameable, nextRound, type Filed, type Queued, type Round } from './reportPolicy.js'
 
 const at = (seconds: number, nanoseconds = 0) => ({ seconds, nanoseconds })
 const filed = (reporterUid: string, createdAt: unknown = at(100), reason = 'harassment') => ({ reporterUid, reason, createdAt })
@@ -165,5 +165,40 @@ describe('holds', () => {
     const flood = await play(['a', 'b', 'c', 'keep', ...Array<string>(50).fill('x'), 'a'])
     expect(flood).toMatchObject({ round: { reporterUids: ['x', 'a'] }, reads: 0 })
     expect(await play(['a', 'b', 'c', 'keep', 'a', 'a', 'b', 'b', 'c', 'c', 'd', 'e', 'f'])).toMatchObject({ hold: true, reads: 4 })
+  })
+})
+
+describe('nameable', () => {
+  it('takes every path the app reports, and any id Firestore can hold', () => {
+    for (const path of [
+      'users/Xy3kQ9aB2cD4eF6gH8iJkL0mN1o2',
+      'groups/late-night-caregivers-x1y2/posts/Xy3kQ9aB2cD4eF6gH8iJ/comments/c1',
+      'groups/daily-check-in/messages/m1',
+      'dms/alice_bob/messages/m1',
+      'chats/c1/messages/m1',
+      'users/__x',
+      'users/x__',
+      `users/${'a'.repeat(1500)}`,
+    ]) {
+      expect(nameable(path), path).toBe(true)
+    }
+  })
+
+  it('refuses ids Firestore reserves or can’t hold, which it refuses to read', () => {
+    for (const path of [
+      'users/__x__',
+      'users/__a\nb__',
+      'groups/__x__/posts/y',
+      'chats/__x__/messages/m',
+      'dms/__a_b__/messages/m',
+      'groups/g/posts/..',
+      'groups/./posts/y',
+      'groups//posts/y',
+      `users/${'a'.repeat(1501)}`,
+      // 751 letters, but 1502 bytes
+      `users/${'é'.repeat(751)}`,
+    ]) {
+      expect(nameable(path), path).toBe(false)
+    }
   })
 })

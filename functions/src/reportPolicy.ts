@@ -78,3 +78,10 @@ export const holds = async (round: Round, queued: Queued | undefined, filed: () 
   const reportedBefore = new Set((await filed()).filter((f) => decidedWith(f.createdAt, decidedAt)).map((f) => f.reporterUid))
   return round.reporterUids.filter((uid) => !reportedBefore.has(uid)).length >= AUTO_HOLD_REPORTERS
 }
+
+// Whether Firestore can name every id in a reported path. The rules only ask each to be free
+// of '/', so a report can name '__x__', '..' or an id too long to exist, and reading that
+// throws on every retry. Nothing is there to review, so the report is simply handled.
+const MAX_ID_BYTES = 1500
+export const nameable = (path: string) =>
+  path.split('/').every((id) => id !== '' && id !== '.' && id !== '..' && !/^__.*__$/s.test(id) && Buffer.byteLength(id) <= MAX_ID_BYTES)

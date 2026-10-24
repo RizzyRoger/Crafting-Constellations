@@ -19,7 +19,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { DocumentData, DocumentReference, Query, QuerySnapshot } from 'firebase-admin/firestore'
 import type { CallableFunction, CallableRequest } from 'firebase-functions/v2/https'
-import { earliestFirst, firebaseConfigFor, listParam, namesAnyone, statusBefore, underWay, userOrNone, within } from './localBackendPolicy.js'
+import { earliestFirst, firebaseConfigFor, listParam, namesAnyone, statusBefore, underWay, userOrNone, within, type SeenConnection } from './localBackendPolicy.js'
 
 // Must match the allow-list in firestore.rules (calls/{callId})
 const CALLABLES = [
@@ -238,18 +238,20 @@ export const startLocalBackend = async () => {
 
   // ---------- friendships ----------
 
-  // Remember each status to see pending → accepted. The first snapshot fills this in. Recent
-  // acceptances we never saw asked (made while we were off, or while the listener reconnected)
-  // are announced too; the notice id names the acceptance, so none is announced twice.
-  const statuses = new Map<string, string>()
+  // Remember each status, and when it was set, to see pending → accepted. The first snapshot
+  // fills this in. Recent acceptances we never saw asked (made while we were off, or while the
+  // listener reconnected, even by a pair we saw accepted before) are announced too; the notice
+  // id names the acceptance, so none is announced twice.
+  const statuses = new Map<string, SeenConnection>()
   let connectionsPrimed = false
   const onConnections = (snap: QuerySnapshot) => {
     const serverNow = snap.readTime.toMillis()
     snap.docChanges().forEach((change) => {
       const id = change.doc.id
       const after = change.type === 'removed' ? undefined : change.doc.data()
-      const before = statusBefore(statuses.get(id), after?.status, after?.updatedAt?.toMillis?.(), serverNow)
-      if (after) statuses.set(id, after.status)
+      const updatedAtMs: number | undefined = after?.updatedAt?.toMillis?.()
+      const before = statusBefore(statuses.get(id), after?.status, updatedAtMs, serverNow)
+      if (after) statuses.set(id, { status: after.status, updatedAtMs })
       else statuses.delete(id)
       // A retry looks at the connection again, so it can't put back what a later change removed
       void retrying(`friendship ${id}`, () => mirrorFriendshipOf(id))

@@ -105,8 +105,23 @@ const published = (path: string) => eventually(async () => (await field(path, 's
 const held = (path: string) => eventually(async () => (await field(path, 'status')) === 'held', `${path} to be held`)
 const queueId = (path: string) => path.replaceAll('/', '~')
 
-// Group talk written while the backend was off, one note every three minutes
-const BACKLOG = Array.from({ length: 12 }, (_, i) => `groups/backlog/messages/m${i + 1}`)
+// What people say to each other, taken in turn: none comes round often enough to read as the same
+// line again and again
+const TALK = [
+  'Still in the waiting room.',
+  'They said another hour at least.',
+  'Dad is asleep now, finally.',
+  'Thank you for staying up with me.',
+  'The nurse came by again.',
+  'Coffee from the machine is awful.',
+  'She squeezed my hand!',
+  'Going to try to rest a bit.',
+]
+const said = (i: number) => TALK[i % TALK.length]
+
+// Posts written while the backend was off, one every three minutes. Paced by when they are
+// judged (all at once), a third of them would be held
+const BACKLOG = Array.from({ length: 12 }, (_, i) => `groups/backlog/posts/p${i + 1}`)
 
 let backend: { stop: () => void }
 let startBackend: () => Promise<{ stop: () => void }>
@@ -134,7 +149,7 @@ beforeAll(async () => {
     BACKLOG.map((path, i) =>
       adminDb.doc(path).set({
         authorUid: 'backlog-writer',
-        text: `Still up with Dad, note ${i + 1}.`,
+        body: `Still up with Dad, note ${i + 1}.`,
         status: 'pending',
         createdAt: new Date(Date.now() - (BACKLOG.length - i) * 3 * 60_000),
       }),
@@ -262,17 +277,118 @@ describe('local backend', () => {
     expect((await adminDb.collection('modQueue').where('authorUid', '==', 'backlog-writer').get()).empty).toBe(true)
   })
 
-  it('still holds a burst, judging one person’s notes in the order they were written', async () => {
+  it('still holds a burst of talk, judging one person’s notes in the order they were written', async () => {
     await adminDb.doc('users/burst-writer').set({ penName: 'Fast Writer', avatarSeed: 'burst-writer', pigment: 'graphite', pro: false, banned: false })
-    // Twenty notes in the last twenty seconds, all arriving at once; ids run newest first
-    const written = Array.from({ length: 20 }, (_, i) => ({ path: `groups/burst/messages/m${String(20 - i).padStart(2, '0')}`, at: Date.now() - (20 - i) * 1000 }))
+    // Thirty lines in the last thirty seconds, all arriving at once; ids run newest first
+    const written = Array.from({ length: 30 }, (_, i) => ({ path: `groups/burst/messages/m${String(30 - i).padStart(2, '0')}`, at: Date.now() - (30 - i) * 1000 }))
     const batch = adminDb.batch()
-    written.forEach(({ path, at }, i) => batch.set(adminDb.doc(path), { authorUid: 'burst-writer', text: `Thinking of you all, ${i + 1}.`, status: 'pending', createdAt: new Date(at) }))
+    written.forEach(({ path, at }, i) => batch.set(adminDb.doc(path), { authorUid: 'burst-writer', text: said(i), status: 'pending', createdAt: new Date(at) }))
     await batch.commit()
     const statuses = async () => Promise.all(written.map(({ path }) => field(path, 'status')))
     await eventually(async () => (await statuses()).every((status) => status !== 'pending'), 'the burst to be moderated')
-    expect(await statuses()).toEqual(written.map((_, i) => (i < 8 ? 'published' : 'held')))
-    expect((await adminDb.collection('modQueue').where('authorUid', '==', 'burst-writer').get()).size).toBe(12)
+    // Twenty lines in a minute go out; past that is faster than anyone types
+    expect(await statuses()).toEqual(written.map((_, i) => (i < 20 ? 'published' : 'held')))
+    expect((await adminDb.collection('modQueue').where('authorUid', '==', 'burst-writer').get()).size).toBe(10)
+  })
+
+  it('never holds a run of quick lines of talk sent as they happen', async () => {
+    const uid = await person('Quick Thumbs')
+    const g = await group([uid])
+    // Twelve lines sent one after another, as news comes in
+    const paths = Array.from({ length: 12 }, (_, i) => `${g}/messages/m${i + 1}`)
+    for (const [i, path] of paths.entries()) {
+      await setDoc(doc(db, path), { authorUid: uid, text: said(i), status: 'pending', createdAt: serverTimestamp() })
+    }
+    await Promise.all(paths.map(published))
+    expect((await adminDb.collection('modQueue').where('authorUid', '==', uid).get()).empty).toBe(true)
+  })
+
+  it('never holds two people’s private notes at texting pace', async () => {
+    const [writer, reader] = ['texting-writer', 'texting-reader']
+    await Promise.all([writer, reader].map((uid) => adminDb.doc(`users/${uid}`).set({ penName: uid, avatarSeed: uid, pigment: 'graphite', pro: false, banned: false })))
+    const pairId = [writer, reader].sort().join('_')
+    await adminDb.doc(`connections/${pairId}`).set({ uids: pairId.split('_'), requester: writer, recipient: reader, status: 'accepted', createdAt: new Date(), updatedAt: new Date() })
+    // Twenty notes each, half a minute apart and taking turns, over the last ten minutes
+    const written = Array.from({ length: 40 }, (_, i) => ({ path: `dms/${pairId}/messages/m${String(i + 1).padStart(2, '0')}`, authorUid: i % 2 ? reader : writer, at: Date.now() - (40 - i) * 15_000 }))
+    const batch = adminDb.batch()
+    written.forEach(({ path, authorUid, at }, i) => batch.set(adminDb.doc(path), { authorUid, text: said(Math.floor(i / 2)), status: 'pending', createdAt: new Date(at) }))
+    await batch.commit()
+    const statuses = async () => Promise.all(written.map(({ path }) => field(path, 'status')))
+    await eventually(async () => (await statuses()).every((status) => status !== 'pending'), 'the notes to be moderated')
+    expect(await statuses()).toEqual(written.map(() => 'published'))
+    expect((await adminDb.collection('modQueue').where('authorUid', 'in', [writer, reader]).get()).empty).toBe(true)
+  })
+
+  it('never holds two people replying to each other under a post, a minute apart each', async () => {
+    const [poster, friend] = ['thread-poster', 'thread-friend']
+    await Promise.all([poster, friend].map((uid) => adminDb.doc(`users/${uid}`).set({ penName: uid, avatarSeed: uid, pigment: 'graphite', pro: false, banned: false })))
+    const post = 'groups/thread/posts/p1'
+    await adminDb.doc(post).set({ authorUid: poster, body: 'Scan results tomorrow.', status: 'published', createdAt: new Date(Date.now() - 16 * 60_000) })
+    // Thirty replies, taking turns half a minute apart, over the last quarter of an hour
+    const written = Array.from({ length: 30 }, (_, i) => ({ path: `${post}/comments/c${String(i + 1).padStart(2, '0')}`, authorUid: i % 2 ? friend : poster, at: Date.now() - (30 - i) * 30_000 }))
+    const batch = adminDb.batch()
+    written.forEach(({ path, authorUid, at }, i) => batch.set(adminDb.doc(path), { authorUid, text: said(Math.floor(i / 2)), status: 'pending', createdAt: new Date(at) }))
+    await batch.commit()
+    const statuses = async () => Promise.all(written.map(({ path }) => field(path, 'status')))
+    await eventually(async () => (await statuses()).every((status) => status !== 'pending'), 'the replies to be moderated')
+    expect(await statuses()).toEqual(written.map(() => 'published'))
+    expect((await adminDb.collection('modQueue').where('authorUid', 'in', [poster, friend]).get()).empty).toBe(true)
+  })
+
+  it('holds the same line said over and over in one place, keeping none of its words', async () => {
+    await adminDb.doc('users/echo-writer').set({ penName: 'Loud Writer', avatarSeed: 'echo-writer', pigment: 'graphite', pro: false, banned: false })
+    // The same line every five seconds over the last two minutes, give or take its case, punctuation and emoji
+    const written = Array.from({ length: 26 }, (_, i) => ({
+      path: `groups/echo/messages/m${String(i + 1).padStart(2, '0')}`,
+      at: Date.now() - (27 - i) * 5000,
+      text: i % 2 ? 'EVERYONE look at my page RIGHT NOW!! 🙂' : 'Everyone, look at my page right now.',
+    }))
+    // Then once in another group, which is no repeat
+    const elsewhere = { path: 'groups/echo-2/messages/m01', at: Date.now() - 5000, text: 'Everyone, look at my page right now.' }
+    const lines = [...written, elsewhere]
+    const batch = adminDb.batch()
+    lines.forEach(({ path, at, text }) => batch.set(adminDb.doc(path), { authorUid: 'echo-writer', text, status: 'pending', createdAt: new Date(at) }))
+    await batch.commit()
+    const statuses = async () => Promise.all(lines.map(({ path }) => field(path, 'status')))
+    await eventually(async () => (await statuses()).every((status) => status !== 'pending'), 'the lines to be moderated')
+    expect(await statuses()).toEqual([...written.map((_, i) => (i < 20 ? 'published' : 'held')), 'published'])
+    const queued = await adminDb.collection('modQueue').where('authorUid', '==', 'echo-writer').get()
+    expect(queued.docs.map((d) => d.get('contentPath')).sort()).toEqual(written.slice(20).map(({ path }) => path))
+    expect(queued.docs.map((d) => d.get('automod.matches'))).toEqual(queued.docs.map(() => [{ category: 'spam', term: 'the same note again' }]))
+    expect(JSON.stringify((await adminDb.doc('rateLimits/echo-writer').get()).data())).not.toMatch(/look|page|everyone/i)
+  })
+
+  it('never holds the same thanks to each person who replied under their own post', async () => {
+    await adminDb.doc('users/thankful-writer').set({ penName: 'Thankful Writer', avatarSeed: 'thankful-writer', pigment: 'graphite', pro: false, banned: false })
+    const post = 'groups/thanks/posts/p1'
+    await adminDb.doc(post).set({ authorUid: 'thankful-writer', body: 'Surgery went well.', status: 'published', createdAt: new Date(Date.now() - 11 * 60_000) })
+    // Twenty well-wishers thanked, a reply every half minute over the last ten minutes
+    const written = Array.from({ length: 20 }, (_, i) => ({ path: `${post}/comments/t${String(i + 1).padStart(2, '0')}`, at: Date.now() - (20 - i) * 30_000 }))
+    const batch = adminDb.batch()
+    written.forEach(({ path, at }) => batch.set(adminDb.doc(path), { authorUid: 'thankful-writer', text: 'Thank you so much ❤️', status: 'pending', createdAt: new Date(at) }))
+    await batch.commit()
+    const statuses = async () => Promise.all(written.map(({ path }) => field(path, 'status')))
+    await eventually(async () => (await statuses()).every((status) => status !== 'pending'), 'the thanks to be moderated')
+    expect(await statuses()).toEqual(written.map(() => 'published'))
+    expect((await adminDb.collection('modQueue').where('authorUid', '==', 'thankful-writer').get()).empty).toBe(true)
+  })
+
+  it('keeps posts to eight in ten minutes, counting talk written between them apart', async () => {
+    await adminDb.doc('users/mixed-writer').set({ penName: 'Busy Writer', avatarSeed: 'mixed-writer', pigment: 'graphite', pro: false, banned: false })
+    // In the last half minute: a post, two lines of talk, and again, nine times
+    const at = (second: number) => new Date(Date.now() - (30 - second) * 1000)
+    const posts = Array.from({ length: 9 }, (_, i) => `groups/mixed/posts/p${i + 1}`)
+    const talk = Array.from({ length: 18 }, (_, i) => `groups/mixed/messages/m${String(i + 1).padStart(2, '0')}`)
+    const batch = adminDb.batch()
+    posts.forEach((path, i) => batch.set(adminDb.doc(path), { authorUid: 'mixed-writer', body: `Update ${i + 1}.`, status: 'pending', createdAt: at(i * 3) }))
+    talk.forEach((path, i) => batch.set(adminDb.doc(path), { authorUid: 'mixed-writer', text: `Line ${i + 1}.`, status: 'pending', createdAt: at(Math.floor(i / 2) * 3 + 1 + (i % 2)) }))
+    await batch.commit()
+    const statuses = async (paths: string[]) => Promise.all(paths.map((path) => field(path, 'status')))
+    await eventually(async () => [...(await statuses(posts)), ...(await statuses(talk))].every((status) => status !== 'pending'), 'the writing to be moderated')
+    expect(await statuses(posts)).toEqual(posts.map((_, i) => (i < 8 ? 'published' : 'held')))
+    expect(await statuses(talk)).toEqual(talk.map(() => 'published'))
+    const queued = await adminDb.collection('modQueue').where('authorUid', '==', 'mixed-writer').get()
+    expect(queued.docs.map((d) => d.get('contentPath'))).toEqual([posts[8]])
   })
 })
 
@@ -345,6 +461,49 @@ describe('notifications', () => {
     expect(await field(path, 'status')).toBe('published')
     expect(await field(path, 'mentioned')).toEqual([{ uid: fern, penName: 'Bracken' }])
     expect(await notices(fern)).toEqual([expect.objectContaining({ type: 'mention', contentPath: path, actorUid: writer })])
+  })
+
+  // Written while the post was up, judged once it had gone (the backend was off). Written here
+  // with the post already gone, so the timing is fixed
+  it('pings nobody about a comment that waited while its post was withdrawn, removed or hidden', async () => {
+    const poster = await person('Sorrel')
+    const fern = await person('Clover')
+    const writer = await person('Linden')
+    const g = await group([poster, fern, writer])
+    const paths = await Promise.all(
+      ['withdrawn', 'removed', 'held'].map(async (status) => {
+        await adminDb.doc(`${g}/posts/${status}`).set({ authorUid: poster, body: 'A long day.', status, createdAt: new Date() })
+        const path = `${g}/posts/${status}/comments/c1`
+        await adminDb.doc(path).set({ authorUid: writer, text: '@Clover thinking of you', mentions: [fern], status: 'pending', createdAt: new Date() })
+        return path
+      }),
+    )
+    await Promise.all(paths.map(published))
+
+    expect(await Promise.all(paths.map((path) => field(path, 'mentioned')))).toEqual([undefined, undefined, undefined])
+    expect(await notices(poster)).toEqual([])
+    expect(await notices(fern)).toEqual([])
+  })
+
+  it('pings nobody once a moderator approves a comment whose post was withdrawn while it was held', async () => {
+    const poster = await person('Tansy')
+    const fern = await person('Vetch')
+    const writer = await person('Burdock')
+    const g = await group([poster, fern, writer])
+    const post = `${g}/posts/p1`
+    await adminDb.doc(post).set({ authorUid: poster, body: 'A long day.', status: 'published', createdAt: new Date() })
+
+    const path = `${post}/comments/c1`
+    await adminDb.doc(path).set({ authorUid: writer, text: '@Vetch thinking of you https://example.test/fundraiser', mentions: [fern], status: 'pending', createdAt: new Date() })
+    await held(path)
+    await signInAs(poster)
+    await updateDoc(doc(db, post), { status: 'withdrawn' })
+
+    await moderator()
+    expect(await callViaQueue('approveContent', { queueId: queueId(path) })).toMatchObject({ state: 'done', result: { ok: true } })
+    expect(await field(path, 'mentioned')).toBeUndefined()
+    expect(await notices(poster)).toEqual([])
+    expect(await notices(fern)).toEqual([])
   })
 
   it('catches up on a recent acceptance from while it was off, and leaves old ones be', async () => {

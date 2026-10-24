@@ -23,3 +23,9 @@ export const pairOfDmPath = (path: string) => {
   const [root, pairId, sub] = path.split('/')
   return root === 'dms' && sub === 'messages' ? pairId : undefined
 }
+
+// Whether a private thread's id (its two uids, sorted, joined by _) has them in it
+export const isPairOf = (pairId: string, uid: string) => {
+  const uids = pairId.split('_')
+  return uids.length === 2 && uids.includes(uid)
+}

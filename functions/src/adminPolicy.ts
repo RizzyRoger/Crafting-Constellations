@@ -79,6 +79,11 @@ export const outcomeOf = (decision: Approval | Removal): Outcome => OUTCOMES[dec
 // up, or stays down
 export const leftAsIs = (status: unknown): Outcome => (status === 'published' ? 'kept' : status === 'withdrawn' ? 'withdrawn' : 'gone')
 
+// Whether a licence decision still has something to decide: an application still waiting for
+// one, or a mark still there to take away. Anything else was decided first, by another
+// moderator or an earlier press, and is left as it is
+export const licenceOpen = (decision: unknown, status: unknown, pro: unknown) => (decision === 'revoke' ? pro === true : status === 'submitted')
+
 // The moderator's note to the writer, as their notice shows it ('' for none)
 export const MAX_NOTE = 500
 

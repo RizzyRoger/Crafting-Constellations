@@ -1,10 +1,11 @@
 /*
- * saveProfile against a moderator's Reset profile, on the Firestore emulator. The
- * handler runs in this process, as the local backend runs it, so the reset can be
- * made to land just before saveProfile's transaction. Needs only Firestore:
- * npm run functions:build, then inside the emulators
+ * saveProfile against a moderator's Reset profile, on the Auth and Firestore emulators.
+ * The handler runs in this process, as the local backend runs it, so the reset can be
+ * made to land just before saveProfile's transaction. Needs Auth too, since saveProfile
+ * asks it whether the caller still exists: npm run functions:build, then inside the emulators
  * vitest run --config vitest.e2e.config.ts tests/e2e/profileRename.test.ts
  */
+import type { Auth } from 'firebase-admin/auth'
 import type { Firestore, Transaction } from 'firebase-admin/firestore'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
@@ -12,14 +13,17 @@ interface Callable {
   run: (request: unknown) => Promise<{ ok: boolean; penName?: string }>
 }
 
+let auth: Auth
 let db: Firestore
 let saveProfile: Callable
 
 beforeAll(async () => {
-  if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Run inside the emulators (Firestore).')
+  if (!process.env.FIRESTORE_EMULATOR_HOST || !process.env.FIREBASE_AUTH_EMULATOR_HOST) throw new Error('Run inside the emulators (Auth and Firestore).')
   process.env.GCLOUD_PROJECT ??= 'demo-crafting-constellations'
   // @ts-expect-error built JS from the functions package (npm run functions:build)
-  db = (await import('../../functions/lib/app.js')).db
+  const app = await import('../../functions/lib/app.js')
+  auth = app.auth
+  db = app.db
   // @ts-expect-error built JS from the functions package (npm run functions:build)
   saveProfile = (await import('../../functions/lib/profile.js')).saveProfile
 })
@@ -32,10 +36,11 @@ const claim = async (lower: string) => (await db.doc(`penNames/${lower}`).get())
 
 let runs = 0
 
-// Someone going by `penName`; their penNames record is their own claim unless given
+// Someone signed up and going by `penName`; their penNames record is their own claim unless given
 const person = async (penName: string, record?: Record<string, unknown>) => {
   const uid = `renamer-${++runs}`
   const lower = penName.toLowerCase()
+  await auth.createUser({ uid })
   await db.doc(`users/${uid}`).set({ penName, penNameLower: lower, avatarSeed: uid, pigment: 'graphite', pro: false, banned: false })
   await db.doc(`penNames/${lower}`).set(record ?? { uid })
   return uid
