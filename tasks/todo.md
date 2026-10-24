@@ -53,6 +53,23 @@ Baseline: typecheck, functions build, unit 133, rules 48, deleteAccount e2e 5, l
   - the check-in form says who reads the answers;
   - the prompt stays off pages that fill the shell, or stays out of their way.
 
+### Round 3
+
+- 17 finders (part of the run was cut off by a spend limit and resumed): 56 raw → 51 unique → 44 confirmed, 7 refuted.
+- Two are high:
+  - this sweep's own moderation fixes added regex lookbehinds to code that ships in the site, so the whole site fails to parse on Safari 15.4–16.3;
+  - the flood hold treated ordinary conversations (more than 8 lines in 10 minutes) as spam.
+- The rest are mostly focus and announcement polish, edge cases in moderator decisions, and follow-ons to round 2.
+- Fixed in 16 groups, then follow-ups H1–H6 and K2–K3 from the reviews:
+  - a flood rule that held caregivers' updates and thank-yous;
+  - e2e tests the fixes had broken;
+  - "Withdrawn" announced;
+  - crisis resources for a crisis chat name;
+  - re-fetching page chunks after a rollback;
+  - two regex leftovers.
+- Decided: T10 (stop treating plain fear of dying as crisis language) is dropped. Five reviews in a row found real crisis lines its exemptions let through. Holding an ordinary line, with resources shown, is the safer failure, so those lines are held as before.
+- The project folder moved to `~/Desktop/code/Hyphen_hacks` mid-round; the worktree was repaired in place (`git worktree repair`) with nothing lost.
+
 ## Notifications, @mentions, seamless paper, draggable chart (2026-10-10)
 
 Plan: `/Users/darren/.claude/plans/i-want-you-to-quiet-stardust.md`

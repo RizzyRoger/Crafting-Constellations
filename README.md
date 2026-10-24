@@ -66,7 +66,7 @@ npm run test:local-backend
 - `npm test` covers the moderation rules, the constellation layout, the account-deletion rules, and helpers.
 - `npm run test:rules` runs the Firestore and Storage security rules against the emulators.
 - `npm run test:e2e` runs account deletion (function, triggers, Storage), a moderator's profile reset, a moderator's licence review, removing a moderator (in the app and with `grant-admin`), and chat and group names end to end against the emulators.
-- `npm run test:local-backend` runs the local backend (below) against the emulators, with no Functions emulator, including how it copes when stopped mid-call, when Auth fails, or with no Storage; plus a rename racing a moderator's profile reset and reporting rounds after a moderator's decision.
+- `npm run test:local-backend` runs the local backend (below) against the emulators, with no Functions emulator, including how it copes when stopped mid-call, when Auth fails, or with no Storage; plus a rename racing a moderator's profile reset, reporting rounds after a moderator's decision, and reports naming a path Firestore can't read.
 
 Stop `npm run emulators` before the last three; they use the same ports.
 
@@ -181,6 +181,15 @@ While the project can't use Cloud Functions, a small program on our own machine 
 - **No inbound ports:** it only makes outgoing connections, so no ports, tunnel or domain are needed.
 - **Restarts:** stopping lets calls under way finish (up to 60s) and answers any still going as interrupted, so the site stops waiting. After a restart, it catches up on anything that arrived while it was off.
 - **Not available:** licence uploads need Storage, so they're paused (the Professional page says so).
+- **Trying it on the emulators:** plain `npm run dev` ignores `VITE_LOCAL_BACKEND` in `.env.local` and sends calls to the Functions emulator. Put `VITE_LOCAL_BACKEND=true` in `.env.development.local` instead, start the emulators without Functions (so the work isn't done twice), and point the backend at them:
+
+  ```bash
+  npx firebase emulators:start --only auth,firestore,storage --project demo-crafting-constellations
+  ```
+
+  ```bash
+  FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 GCLOUD_PROJECT=demo-crafting-constellations npm run local-backend
+  ```
 
 **On the NUC** (Linux, Node 22):
 
