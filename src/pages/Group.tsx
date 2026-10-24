@@ -10,11 +10,14 @@ import { LikeButton } from '../components/LikeButton'
 import { MentionText } from '../components/MentionText'
 import { PageHead } from '../components/PageHead'
 import { Quiet } from '../components/Quiet'
+import { Said, useSaid } from '../components/Said'
 import { Talk } from '../components/Talk'
 import { describeError } from '../lib/callables'
 import { db } from '../lib/firebase'
+import { isFirstClick, standingIn } from '../lib/groupStanding'
 import { useDocData, useLiveContent } from '../lib/live'
 import { useGroupPeople } from '../lib/people'
+import { isPlainId } from '../lib/routeIds'
 import { joinGroup, leaveGroup } from '../lib/social'
 import type { Group as GroupDoc, Post, Profile } from '../lib/types'
 import { HEAD_DESCENDING } from '../wash/strokes'
@@ -24,6 +27,13 @@ type Tab = 'talk' | 'posts'
 const peopleHere = (count: number | undefined) => {
   const n = count ?? 0
   return n === 1 ? '1 person is here.' : `${n} people are here.`
+}
+
+// The icon is hidden, so this is the comment link's whole name
+const commentsLabel = (count: number | undefined) => {
+  const n = count ?? 0
+  if (n === 0) return 'Comment'
+  return n === 1 ? '1 comment' : `${n} comments`
 }
 
 const RoomHost = ({ description, count }: { description?: string; count?: number }) => (
@@ -36,6 +46,7 @@ const RoomHost = ({ description, count }: { description?: string; count?: number
 const Posts = ({ group, me, verified, people }: { group: GroupDoc; me: string; verified: boolean; people: Profile[] }) => {
   const posts = useLiveContent<Post>(`groups/${group.id}/posts`, me, { max: 40 })
   const field = useRef<HTMLTextAreaElement>(null)
+  const [said, say] = useSaid(group.id)
 
   const publish = async (body: string, title: string | undefined, mentions: string[]) => {
     await addDoc(collection(db, `groups/${group.id}/posts`), {
@@ -72,6 +83,8 @@ const Posts = ({ group, me, verified, people }: { group: GroupDoc; me: string; v
       ) : (
         <ConfirmEmail />
       )}
+      {/* Outside the list, which goes with the last post withdrawn */}
+      <Said said={said} />
       {quiet ? null : (
         <ul className="post-list">
           {posts.data.map((p) => (
@@ -80,11 +93,14 @@ const Posts = ({ group, me, verified, people }: { group: GroupDoc; me: string; v
                 item={p}
                 me={me}
                 variant="card"
+                say={say}
                 actions={
-                  p.status === 'published' && verified && (
+                  // Liking needs a confirmed email; opening the post doesn't, and it's the only way
+                  // into an untitled one and its comments
+                  p.status === 'published' && (
                     <>
-                      <LikeButton postPath={p.path} me={me} count={p.likeCount} />
-                      <Link to={`/groups/${group.id}/posts/${p.id}`} className="mark" aria-label={p.commentCount ? `${p.commentCount} comments` : 'Comment'}>
+                      {verified && <LikeButton postPath={p.path} me={me} count={p.likeCount} />}
+                      <Link to={`/groups/${group.id}/posts/${p.id}`} className="mark" aria-label={commentsLabel(p.commentCount)}>
                         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
                           <path d="M5 6.5h14v9H8l-3 3v-12z" />
                         </svg>
@@ -113,19 +129,19 @@ export const Group = () => {
   const { uid, claims } = useMe()
   const [params, setParams] = useSearchParams()
   const tab: Tab = params.get('tab') === 'posts' ? 'posts' : 'talk'
-  const group = useDocData<GroupDoc>(`groups/${groupId}`)
-  const membership = useDocData<{ uid: string }>(`groups/${groupId}/members/${uid}`)
-  const people = useGroupPeople(groupId, uid)
+  // An id that can't name a group (an encoded '/') asks for nothing, so it reads as gone
+  const valid = isPlainId(groupId)
+  const group = useDocData<GroupDoc>(valid ? `groups/${groupId}` : null)
+  const membership = useDocData<{ uid: string }>(valid ? `groups/${groupId}/members/${uid}` : null)
+  const people = useGroupPeople(valid ? groupId : null, uid)
   const [leaving, setLeaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   if (group.loading || membership.loading) return <Quiet>Opening the group…</Quiet>
   if (!group.data) return <Quiet>This group isn’t here any more.</Quiet>
 
-  // Member-only listeners open only once the server has the membership, and
-  // close before it goes, so rules never see a reader they'd reject
-  const member = Boolean(membership.data) && !membership.pending && !leaving
-  const joining = Boolean(membership.data) && membership.pending
+  const standing = standingIn(membership, leaving)
+  const member = standing === 'member'
 
   const join = async () => {
     setError(null)
@@ -163,17 +179,27 @@ export const Group = () => {
             <button type="button" className="link-btn" onClick={() => void leave()}>
               Leave group
             </button>
-          ) : joining ? (
-            <span className="status-note">joining…</span>
-          ) : (
-            <button type="button" className="act act--wash" onClick={() => void join()}>
+          ) : standing === 'outside' ? (
+            <button
+              type="button"
+              className="act act--wash"
+              onClick={(e) => {
+                if (isFirstClick(e.detail)) void join()
+              }}
+            >
               Join this group
             </button>
+          ) : (
+            <span className="status-note">{standing === 'joining' ? 'joining…' : 'leaving…'}</span>
           )}
         </div>
       </PageHead>
 
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
 
       {member ? (
         <>

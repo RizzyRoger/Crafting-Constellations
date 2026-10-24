@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layoutEgo } from './egoLayout'
+import { egoCircle, layoutEgo } from './egoLayout'
 
 const input = {
   width: 800,
@@ -49,5 +49,27 @@ describe('ego layout', () => {
 
   it('is deterministic', () => {
     expect(layoutEgo(input)).toEqual(layout)
+  })
+})
+
+describe('who sits around you', () => {
+  const tie = (id: string, a: string, b: string) => ({ id, uids: [a, b] as [string, string] })
+
+  it('names a friend’s friend with every friend of yours they’re tied to, the one they’re drawn beside first', () => {
+    const circle = egoCircle({ me: 'me', friendships: [tie('me-b', 'me', 'b'), tie('me-a', 'me', 'a'), tie('b-c', 'b', 'c'), tie('c-a', 'c', 'a')], pending: [] })
+    expect([...circle.friends].sort()).toEqual(['a', 'b'])
+    expect(circle.through.get('c')).toEqual(['b', 'a'])
+  })
+
+  it('keeps requests on the first ring, and blocked people nowhere', () => {
+    const circle = egoCircle({
+      me: 'me',
+      friendships: [tie('me-a', 'me', 'a'), tie('a-p', 'a', 'p'), tie('a-x', 'a', 'x'), tie('me-x', 'me', 'x')],
+      pending: [tie('me-p', 'p', 'me')],
+      blocked: ['x'],
+    })
+    expect([...circle.friends]).toEqual(['a'])
+    expect([...circle.pending]).toEqual(['p'])
+    expect([...circle.through.keys()]).toEqual([])
   })
 })

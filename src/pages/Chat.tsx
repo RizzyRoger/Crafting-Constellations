@@ -1,15 +1,18 @@
-import { collection } from 'firebase/firestore'
+import { collection, query, where } from 'firebase/firestore'
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { PageHead } from '../components/PageHead'
 import { Quiet } from '../components/Quiet'
 import { Talk } from '../components/Talk'
 import { Who } from '../components/Who'
 import { describeError } from '../lib/callables'
+import { useCurrentPath } from '../lib/currentPath'
 import { db } from '../lib/firebase'
-import { useDocData, useQueryData } from '../lib/live'
+import { useQueryData } from '../lib/live'
+import { findById } from '../lib/lookup'
 import { among } from '../lib/people'
+import { hereOf } from '../lib/returnTo'
 import { leaveChat } from '../lib/social'
 import type { Chat as ChatDoc, Profile } from '../lib/types'
 import { HEAD_DESCENDING } from '../wash/strokes'
@@ -19,46 +22,59 @@ export const Chat = () => {
   const { chatId = '' } = useParams()
   const { uid, claims } = useMe()
   const navigate = useNavigate()
+  const location = useLocation()
+  const currentPath = useCurrentPath()
   const verified = claims.emailVerified
-  const [leaving, setLeaving] = useState(false)
+  // Which chat I'm leaving: another opened from the rail meanwhile keeps this page mounted, and
+  // isn't the one being left
+  const [leaving, setLeaving] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Listeners close before leaving, so the rules never see a reader they'd reject
-  const chat = useDocData<ChatDoc>(verified && !leaving ? `chats/${chatId}` : null)
+  // Found among my chats, not by its document: that's refused once I've left (Back
+  // after leaving, an old notice). Listeners close before leaving, so the rules
+  // never see a reader they'd reject
+  const chats = useQueryData<ChatDoc>(verified && leaving !== chatId ? `chats|${uid}` : null, () =>
+    query(collection(db, 'chats'), where('uids', 'array-contains', uid)),
+  )
+  const chat = findById(chats.data, chatId)
   const people = useQueryData<Profile>('people', () => collection(db, 'users'))
   const byId = new Map(people.data.map((p) => [p.id, p]))
 
   if (!verified) {
     return (
       <Quiet>
-        Confirm your email to open private chats. <Link to="/verify">Confirm email</Link>
+        Confirm your email to open private chats. <Link to="/verify" state={{ from: hereOf(location) }}>Confirm email</Link>
       </Quiet>
     )
   }
-  if (leaving) return <Quiet>Leaving the chat…</Quiet>
-  if (chat.loading) return <Quiet>Opening…</Quiet>
-  if (!chat.data || !chat.data.uids.includes(uid)) return <Quiet>This chat isn’t yours to open.</Quiet>
+  if (leaving === chatId) return <Quiet>Leaving the chat…</Quiet>
+  if (chats.loading) return <Quiet>Opening…</Quiet>
+  if (!chat) return <Quiet>This chat isn’t yours to open.</Quiet>
 
-  const members = chat.data.uids.map((id) => byId.get(id)).filter((p): p is Profile => Boolean(p))
+  const members = chat.uids.map((id) => byId.get(id)).filter((p): p is Profile => Boolean(p))
 
   const leave = async () => {
-    setLeaving(true)
+    const from = location.pathname
+    setLeaving(chatId)
     setError(null)
     try {
       await new Promise((r) => setTimeout(r, 0))
       await leaveChat(chatId, uid)
-      navigate('/messages')
+      // It waits for the server, offline for as long as that lasts. Gone elsewhere by then, they
+      // stay on the page they chose, and the chat drops from the rail
+      if (currentPath() === from) return navigate('/messages')
     } catch (e) {
-      setError(describeError(e))
-      setLeaving(false)
+      if (currentPath() === from) setError(describeError(e))
     }
+    // Done, so this chat shows as it now is, whether they're still on it or come back to it later
+    setLeaving((current) => (current === chatId ? null : current))
   }
 
   return (
     <div className="pane">
       <PageHead
-        title={chat.data.name}
-        kicker={`Private chat · ${chat.data.uids.length} ${chat.data.uids.length === 1 ? 'person' : 'people'}`}
+        title={chat.name}
+        kicker={`Private chat · ${chat.uids.length} ${chat.uids.length === 1 ? 'person' : 'people'}`}
         lede="Only the people here can read this. Messages are checked like everything else."
         strokes={HEAD_DESCENDING}
         seed={chatId.length * 17}
@@ -75,16 +91,22 @@ export const Chat = () => {
         </div>
       </PageHead>
 
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
 
+      {/* Keyed on the chat: moving to another keeps this page mounted, and a draft or its @mentions must not follow you there */}
       <Talk
+        key={chatId}
         path={`chats/${chatId}/messages`}
         me={uid}
         verified={verified}
         label="Private chat"
         privateThread
-        people={among(people.data, chat.data.uids, uid)}
-        host={<p>{chat.data.uids.length === 1 ? '1 person is in this chat.' : `${chat.data.uids.length} people are in this chat.`}</p>}
+        people={among(people.data, chat.uids, uid)}
+        host={<p>{chat.uids.length === 1 ? '1 person is in this chat.' : `${chat.uids.length} people are in this chat.`}</p>}
       />
     </div>
   )

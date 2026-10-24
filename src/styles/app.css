@@ -68,16 +68,23 @@ p {
 
 /* ---------- app shell: page + annotation rail ---------- */
 
+/* dvh, where there is one: on phones 100vh is the height with the toolbars hidden, so while they
+   show, the bottom of the shell (a send bar) sat under Safari's bar or below Chrome's screen */
 .shell {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
   height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
+  min-height: 100dvh;
   max-width: none;
   margin: 0;
 }
 
+/* The page scrolls here, not the window. Positioned, so hidden labels and inputs (position: absolute)
+   scroll and clip with it, instead of stretching the document and taking the whole shell with them */
 .shell__main {
+  position: relative;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -87,6 +94,13 @@ p {
   padding: clamp(20px, 4vh, 40px) clamp(20px, 3vw, 48px) 24px;
 }
 
+/* Focused only from code, when the check-in prompt is set aside: the whole page needs no ring */
+.shell__main:focus-visible {
+  outline: none;
+}
+
+/* As tall as the shell, so the lists scroll and the foot stays in view. With only a min-height it
+   took the lists' height, ran past a short window with Sign out under it, and the window scrolled */
 .rail {
   position: sticky;
   top: 0;
@@ -94,10 +108,26 @@ p {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   padding: 22px 16px 28px;
   border-right: 1px solid var(--ink);
   background: var(--paper);
+}
+
+/* Above the phone rules (@media max-width 900px), which change these and must come later to win */
+.rail__browse {
+  min-height: 0;
+  overflow: auto;
+  flex: 1;
+}
+
+.rail__foot {
+  flex: none;
+  margin-top: auto;
+  display: grid;
+  gap: 14px;
+  padding-top: 16px;
 }
 
 .rail .plate__name {
@@ -173,6 +203,11 @@ p {
   gap: 4px;
 }
 
+/* A moderator's note may carry a link, one long word that widened the page past a phone */
+.banner .note {
+  overflow-wrap: anywhere;
+}
+
 /* ---------- page head: one wash per viewport, title orbits it ---------- */
 
 .page-head {
@@ -183,6 +218,9 @@ p {
   gap: clamp(16px, 3vw, 40px);
   min-height: clamp(150px, 24vh, 220px);
   margin-bottom: clamp(20px, 4vh, 40px);
+  /* The page is a flex column: on phones (no min-height) the head would shrink to nothing,
+     and its wash and text would lie over what follows and catch its taps */
+  flex-shrink: 0;
 }
 
 .page-head .wash {
@@ -197,12 +235,15 @@ p {
   align-content: center;
 }
 
+/* A chat's name can be one 32-letter word. On a phone the head's single column grew to fit it, and
+   the chat and its send bar scrolled sideways */
 .page-head h1 {
   font-family: var(--font-pencil);
   font-weight: 300;
   font-size: clamp(28px, 3.4vw, 40px);
   line-height: 1.1;
   color: var(--ink-deep);
+  overflow-wrap: anywhere;
 }
 
 .page-head .lede {
@@ -322,11 +363,14 @@ p {
   min-width: 0;
 }
 
+/* A pen name can be 32 letters with no space. Too wide for its place, it breaks instead of pushing
+   the row, or a chat's column, wider. break-word wouldn't: the name's smallest width stays the word's */
 .who__name {
   font-family: var(--font-pencil);
   font-weight: 400;
   font-size: 17px;
   color: var(--ink-deep);
+  overflow-wrap: anywhere;
 }
 
 .licensed {
@@ -396,12 +440,15 @@ p {
   color: var(--meta-readable);
 }
 
+/* A title can be a link's whole address, one long word. It breaks rather than widening the post list,
+   which on a phone scrolled every post sideways */
 .post__title {
   font-family: var(--font-pencil);
   font-weight: 400;
   font-size: 22px;
   line-height: 1.2;
   color: var(--ink-deep);
+  overflow-wrap: anywhere;
 }
 
 .post__title a {
@@ -412,7 +459,9 @@ p {
   text-decoration: underline;
 }
 
+/* Positioned like .shell__main: my bubbles' hidden 'You' scrolls and clips with it */
 .chat {
+  position: relative;
   display: grid;
   gap: 14px;
   align-content: start;
@@ -422,7 +471,9 @@ p {
   overscroll-behavior: contain;
 }
 
+/* Positioned for the same reason as .shell__main: it scrolls on its own */
 .pane {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -552,6 +603,7 @@ p {
   color: var(--ink);
 }
 
+/* A refusal may name a file, and a file name can be one long underscore-joined word */
 .error {
   font-family: var(--font-code);
   font-size: 13px;
@@ -559,6 +611,7 @@ p {
   color: #4a2f2a;
   border-left: 2px solid #4a2f2a;
   padding-left: 10px;
+  overflow-wrap: anywhere;
 }
 
 /* ---------- forms ---------- */
@@ -614,8 +667,10 @@ p {
   outline-offset: 4px;
 }
 
+/* Names the files chosen, which can be one long word */
 .field .hint {
   margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 
 .pigments {
@@ -662,9 +717,19 @@ p {
   text-underline-offset: 4px;
 }
 
-.pigments input:focus-visible + .swatch {
+/* The radio is hidden, and the swatch's mask (its wet edge) clips anything drawn outside it, a focus
+   ring included. So the ring goes round the whole label */
+.pigments label:has(input:focus-visible) {
   outline: 2px solid var(--ink);
-  outline-offset: 3px;
+  outline-offset: 2px;
+}
+
+/* Without :has(), round the pigment's name */
+@supports not selector(:has(a)) {
+  .pigments input:focus-visible + .swatch + .code {
+    outline: 2px solid var(--ink);
+    outline-offset: 3px;
+  }
 }
 
 .act[disabled] {
@@ -675,6 +740,12 @@ p {
 .act--quiet {
   font-size: 16px;
   padding: 2px 10px 3px;
+}
+
+/* The wash fades to paper over its last 20%, and its right padding keeps the label out of that.
+   The quiet 10px put the end of 'Count my visits' at 92%, about 1.7:1; 32px keeps 118px of label clear */
+.act--quiet.act--wash {
+  padding-right: 32px;
 }
 
 .or {
@@ -748,10 +819,12 @@ p {
   align-items: center;
 }
 
+/* A pen name can be 32 letters with no space, wider than a phone at this size */
 .person__name {
   font-family: var(--font-pencil);
   font-size: 24px;
   color: var(--ink-deep);
+  overflow-wrap: anywhere;
 }
 
 /* ---------- quiet full-page states ---------- */
@@ -781,19 +854,21 @@ p {
     padding: 16px 16px 16px;
   }
 
+  /* Capped, so the rail scrolls as a whole and the lists keep their height. With the foot pinned they
+     got what it left: 14px at 375x667, none in landscape, and a longer foot lost Sign out too */
   .rail {
     position: static;
+    height: auto;
     min-height: 0;
     max-height: 38vh;
-    overflow: hidden;
+    overflow: auto;
     border-right: 0;
     border-bottom: 1px solid var(--ink);
     gap: 8px;
   }
 
   .rail__browse {
-    min-height: 0;
-    overflow: auto;
+    flex: none;
   }
 
   .rail__foot {
@@ -837,6 +912,28 @@ p {
   .page-head .wash {
     height: 120px;
     margin-right: 30%;
+  }
+
+  /* Talk on a phone: there is no room for the head, the tabs and a chat at once. The head and
+     tabs scroll away, and the chat and its send bar fill the whole pane */
+  .pane:has(.stage) {
+    overflow: auto;
+  }
+
+  .pane > .stage {
+    flex: none;
+    height: 100%;
+  }
+
+  /* Pulling down past the first message brings the head and tabs back */
+  .pane > .stage .chat {
+    overscroll-behavior-y: auto;
+  }
+
+  /* Talk brings its last line (an empty marker) into view on open and on each new message. This
+     margin carries the pane along to the bottom too, so the send bar shows under the chat */
+  .pane > .stage .chat > :last-child {
+    scroll-margin-bottom: 100vh;
   }
 }
 
@@ -1341,6 +1438,14 @@ p {
   outline-offset: 3px;
 }
 
+/* Writing held for a link repeats it whole on the matched line, and may carry it in its title. An
+   address with no hyphen is one long word, which widened the page past a phone's width. anywhere,
+   not break-word: only anywhere lets the list's column shrink below the word */
+.admin-entry > .post__title,
+.admin-entry > .meta {
+  overflow-wrap: anywhere;
+}
+
 .admin-dl {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -1356,8 +1461,10 @@ p {
   color: var(--meta-readable);
 }
 
+/* A statement may link to a licensing board's lookup, one long word */
 .admin-dl dd {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 /* ---------- wire chrome: rail, graph, bubbles, cards ---------- */
@@ -1419,6 +1526,8 @@ p {
   gap: 2px;
 }
 
+/* A pen name or a chat's name can be one 32-letter word, wider than the rail's lists. It pushed their
+   column wider, and the lists and their headings scrolled sideways under a name cut off mid-word */
 .disc__list a,
 .disc__list button,
 .disc__empty {
@@ -1431,6 +1540,7 @@ p {
   padding: 4px 0;
   text-align: left;
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
 .disc__empty {
@@ -1451,20 +1561,6 @@ a.disc__empty:hover {
 .disc__list a[aria-current='page'] {
   text-decoration: underline;
   text-underline-offset: 3px;
-}
-
-.rail__browse {
-  min-height: 0;
-  overflow: auto;
-  flex: 1;
-}
-
-.rail__foot {
-  flex: none;
-  margin-top: auto;
-  display: grid;
-  gap: 14px;
-  padding-top: 16px;
 }
 
 .rail__quiet {
@@ -1531,7 +1627,8 @@ a.disc__empty:hover {
   cursor: pointer;
 }
 
-/* Everyone but you can be dragged; touch drags the dot, not the page */
+/* Everyone but you can be dragged. Chrome ignores touch-action on an SVG <g>, so EgoMap also
+   keeps the page still while a finger holds a dot */
 .ego__node.is-draggable {
   cursor: grab;
   touch-action: none;
@@ -1572,6 +1669,7 @@ a.disc__empty:hover {
 
 .bubble {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 12px;
 }
@@ -1612,11 +1710,47 @@ a.disc__empty:hover {
   margin: 0;
 }
 
+/* Who wrote it, over the words. My bubbles show no name, so their head holds only the licensed
+   mark or the writing's state, and is often empty; then it takes no room */
+.bubble__box > .item__head,
+.comment-row__bar > .item__head {
+  margin-bottom: 4px;
+}
+
+.bubble__box > .item__head:empty {
+  display: none;
+}
+
+/* The name here has no blot beside it, so a long one drops its licensed mark underneath and only
+   breaks when it can't fit on its own */
+.bubble__box > .item__head > .who,
+.comment-row__bar > .item__head > .who {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
 .comment-row {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
   gap: 14px;
   align-items: center;
+}
+
+/* Crisis resources go on a line of their own under the writing, never into the avatar column or beside
+   the bubble. A bubble's card stops at 560px and its margin takes the rest of the line, so nothing fits
+   next to it; the card keeps to the bubble's side */
+.bubble > .crisis {
+  flex: 0 0 100%;
+  margin-right: max(0px, 100% - 560px);
+}
+
+.bubble--out > .crisis {
+  margin-right: 0;
+  margin-left: max(0px, 100% - 560px);
+}
+
+.comment-row > .crisis {
+  grid-column: 1 / -1;
 }
 
 .comment-row__bar {
@@ -1954,6 +2088,11 @@ a.disc__empty:hover {
   gap: 6px;
 }
 
+/* A moderator's note may carry a link, one long word that widened the page past a phone */
+.notice .meta {
+  overflow-wrap: anywhere;
+}
+
 .notice__open {
   display: grid;
   gap: 6px;
@@ -1979,7 +2118,8 @@ a.notice__open:focus-visible .note {
   color: var(--ink);
 }
 
-/* Unread: an ink rule at the left edge, and "new" in the meta line for anyone not seeing it */
+/* Unread: an ink rule at the left edge, and "new" in the meta line for anyone not seeing it.
+   Read rows aren't faded: a moderator's note and the times must stay readable */
 .notice--unread {
   border-left: 2px solid var(--ink);
   padding-left: 12px;
@@ -1987,8 +2127,4 @@ a.notice__open:focus-visible .note {
 
 .ruled-list > li.notice--unread {
   padding-left: 12px;
-}
-
-.notice:not(.notice--unread) {
-  opacity: 0.8;
 }

@@ -1,13 +1,26 @@
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
-import { ref, uploadBytes } from 'firebase/storage'
-import { useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { getMetadata, ref, uploadBytes } from 'firebase/storage'
+import { useRef, useState, type FormEvent } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { PageHead } from '../components/PageHead'
 import { Quiet } from '../components/Quiet'
 import { describeError } from '../lib/callables'
 import { db, LOCAL_BACKEND, storage } from '../lib/firebase'
 import { useDocData } from '../lib/live'
+import {
+  applicationProblem,
+  DOC_TYPES,
+  documentRoom,
+  documentsHint,
+  openSlots,
+  placeDocuments,
+  reapplyNote,
+  reapplyRound,
+  slotsToCheck,
+  SLOTS,
+} from '../lib/proApplication'
+import { hereOf } from '../lib/returnTo'
 import type { ProApplication } from '../lib/types'
 
 const LICENSE_TYPES = [
@@ -20,9 +33,33 @@ const LICENSE_TYPES = [
   ['other', 'Other licensed role'],
 ] as const
 
-const ACCEPT = 'application/pdf,image/png,image/jpeg,image/webp'
-const MAX_BYTES = 10 * 1024 * 1024
-const SLOTS = ['doc-1', 'doc-2', 'doc-3', 'doc-4', 'doc-5']
+const ACCEPT = DOC_TYPES.join(',')
+
+// Slots an earlier attempt filled without reaching the application; the owner may read their own
+const storedSlots = async (uid: string, slots: string[]) => {
+  const found = await Promise.all(
+    slots.map((s) =>
+      getMetadata(ref(storage, `proDocs/${uid}/${s}`)).then(
+        () => true,
+        (e: unknown) => {
+          if ((e as { code?: string }).code === 'storage/object-not-found') return false
+          throw e
+        },
+      ),
+    ),
+  )
+  return slots.filter((_, i) => found[i])
+}
+
+// Remembers this page, so confirming comes back to it (see Verify), as ConfirmEmail does
+const ConfirmFirst = () => {
+  const location = useLocation()
+  return (
+    <p className="pencil note">
+      <Link to="/verify" state={{ from: hereOf(location) }}>Confirm your email</Link> first, then come back to apply.
+    </p>
+  )
+}
 
 export const Professional = () => {
   const { uid, claims, profile } = useMe()
@@ -35,25 +72,30 @@ export const Professional = () => {
   const [files, setFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [tries, setTries] = useState(0)
+  const sent = useRef(false)
 
   if (application.loading) return <Quiet>Opening…</Quiet>
 
   const existing = application.data
-  // Uploads are write-once; a resubmission uses the slots still free
-  const freeSlots = SLOTS.filter((s) => !existing?.files.includes(s))
+  const listed = existing?.files ?? []
+  const round = reapplyRound(existing)
+  const room = documentRoom(existing)
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setError(null)
-    if (files.length === 0) return setError('Add at least one document.')
-    if (files.length > freeSlots.length) return setError(`You can add ${freeSlots.length} more document(s).`)
-    const tooBig = files.find((f) => f.size > MAX_BYTES)
-    if (tooBig) return setError(`${tooBig.name} is over 10 MB.`)
-
+    setTries((n) => n + 1)
     setBusy(true)
     try {
-      const names = freeSlots.slice(0, files.length)
-      await Promise.all(files.map((file, i) => uploadBytes(ref(storage, `proDocs/${uid}/${names[i]}`), file, { contentType: file.type })))
+      // Once there's an application, uploads are write-once, and a try that never reached it may have filled some
+      const free = openSlots(listed, await storedSlots(uid, slotsToCheck(existing, files.length)))
+      // Everything the rules check, before a refusal can strand an upload
+      const problem = applicationProblem({ legalName, licenseRegion, licenseNumber, files, listed, open: round ? SLOTS.length : free.length })
+      if (problem) return setError(problem)
+      const placed = placeDocuments({ listed, free, count: files.length, round })
+      await Promise.all(files.map((file, i) => uploadBytes(ref(storage, `proDocs/${uid}/${placed.names[i]}`), file, { contentType: file.type })))
+      sent.current = true
       await setDoc(doc(db, `proApplications/${uid}`), {
         uid,
         status: 'submitted',
@@ -61,7 +103,7 @@ export const Professional = () => {
         licenseType,
         licenseRegion: licenseRegion.trim(),
         licenseNumber: licenseNumber.trim(),
-        files: [...(existing?.files ?? []), ...names],
+        files: placed.files,
         ...(statement.trim() ? { statement: statement.trim() } : {}),
         submittedAt: serverTimestamp(),
       })
@@ -71,6 +113,13 @@ export const Professional = () => {
     } finally {
       setBusy(false)
     }
+  }
+
+  // Sending swaps the form, focused button and all, for the banner; focus follows so the thanks is heard
+  const thanked = (banner: HTMLDivElement | null) => {
+    if (!banner || !sent.current) return
+    sent.current = false
+    banner.focus()
   }
 
   const head = (
@@ -97,8 +146,10 @@ export const Professional = () => {
     return (
       <>
         {head}
-        <div className="banner">
-          <p className="pencil note">Thank you. Your application is with a moderator. You’ll find a note under “You” when it’s been reviewed.</p>
+        <div className="banner" tabIndex={-1} ref={thanked}>
+          <p className="pencil note">
+            Thank you. Your application is with a moderator. You’ll find a note in <Link to="/notifications">Notifications</Link> when it’s been reviewed.
+          </p>
         </div>
       </>
     )
@@ -118,19 +169,20 @@ export const Professional = () => {
     return (
       <>
         {head}
-        <p className="pencil note">
-          <Link to="/verify">Confirm your email</Link> first, then come back to apply.
-        </p>
+        <ConfirmFirst />
       </>
     )
   }
 
+  const again = reapplyNote(existing)
+  const hint = documentsHint(listed.length, files.map((f) => f.name))
+
   return (
     <>
       {head}
-      {existing?.status === 'denied' && (
+      {again && (
         <div className="banner" style={{ marginBottom: 24 }}>
-          <p className="pencil note">Your last application wasn’t approved.{existing.reviewNote ? ` Note: ${existing.reviewNote}` : ''} You can apply again.</p>
+          <p className="pencil note">{again}</p>
         </div>
       )}
       <form className="form" onSubmit={submit} style={{ maxWidth: 560 }}>
@@ -162,13 +214,27 @@ export const Professional = () => {
           <textarea id="statement" rows={3} maxLength={1000} value={statement} onChange={(e) => setStatement(e.target.value)} />
         </div>
         <div className="field">
-          <label htmlFor="docs">Licence documents — PDF or image, up to {freeSlots.length}, 10 MB each</label>
-          <input id="docs" type="file" accept={ACCEPT} multiple onChange={(e) => setFiles([...(e.target.files ?? [])].slice(0, freeSlots.length))} />
-          {files.length > 0 && <span className="hint">{files.map((f) => f.name).join(', ')}</span>}
+          <label htmlFor="docs">
+            {listed.length ? 'New licence documents (optional)' : 'Licence documents'} — PDF or image, up to {room}, 10 MB each
+          </label>
+          <input
+            id="docs"
+            type="file"
+            accept={ACCEPT}
+            multiple
+            disabled={room === 0}
+            onChange={(e) => setFiles([...(e.target.files ?? [])].slice(0, room))}
+          />
+          {hint && <span className="hint">{hint}</span>}
         </div>
-        {error && <p className="error">{error}</p>}
+        {/* A new node each try, so the same refusal twice is announced twice */}
+        {error && (
+          <p key={tries} className="error" role="alert">
+            {error}
+          </p>
+        )}
         <div className="row">
-          <button type="submit" className="act act--wash" disabled={busy || freeSlots.length === 0}>
+          <button type="submit" className="act act--wash" disabled={busy}>
             {busy ? 'Sending…' : 'Send for review'}
           </button>
         </div>

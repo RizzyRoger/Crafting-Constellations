@@ -15,9 +15,11 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* dvh, where there is one: on phones 100vh is the height with the toolbars hidden */
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--paper);
   font-family: var(--font-code);
   font-size: 15px;
@@ -176,8 +178,15 @@ a:focus-visible .swatch,
   outline: none;
 }
 
-.field input::placeholder {
+.field .error {
+  margin-top: 4px;
+}
+
+/* A placeholder can be a field's only visible label (a send bar, a moderator's note). Browsers draw
+   it lighter than 4.5:1 on paper, and Firefox at 0.54 opacity besides */
+::placeholder {
   color: var(--meta-readable);
+  opacity: 1;
 }
 
 .field input:focus {
@@ -260,6 +269,12 @@ a:focus-visible .swatch,
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* A live region stays mounted so screen readers hear what lands in it. Empty, it leaves the
+   grid (no gap for it) but stays in the accessibility tree, unlike display: none */
+.live:empty {
+  position: absolute;
 }
 
 .synthetic {

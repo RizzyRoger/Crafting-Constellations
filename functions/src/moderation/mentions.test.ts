@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { hasMention, splitMentions } from './index.js'
+import { hasMention, mentionedIn, splitMentions } from './index.js'
+
+const people = [
+  { uid: 'q', penName: 'Quiet' },
+  { uid: 'qh', penName: 'Quiet Heron' },
+  { uid: 'f', penName: 'Fern' },
+]
 
 describe('hasMention', () => {
   it('finds a pen name with spaces, in any case', () => {
@@ -28,18 +34,25 @@ describe('hasMention', () => {
     expect(hasMention('thanks @J.R.', 'J.R.')).toBe(true)
   })
 
+  // A vowel sign is a combining mark, not a letter, but it carries on the word
+  it('reads a vowel sign as part of the name', () => {
+    expect(hasMention('hi @प्रिया', 'प्रिय')).toBe(false)
+    expect(hasMention('hi @प्रिया!', 'प्रिया')).toBe(true)
+    expect(hasMention('नमस्ते@प्रिया', 'प्रिया')).toBe(false)
+  })
+
+  // An emoji's variation selector or keycap is a mark, but not part of a word
+  it('finds a mention straight after an emoji', () => {
+    expect(hasMention('\u2764\ufe0f@Fern hi', 'Fern')).toBe(true)
+    expect(hasMention('1\ufe0f\u20e3@Fern hi', 'Fern')).toBe(true)
+  })
+
   it('is false for an empty name', () => {
     expect(hasMention('@ hello', '')).toBe(false)
   })
 })
 
 describe('splitMentions', () => {
-  const people = [
-    { uid: 'q', penName: 'Quiet' },
-    { uid: 'qh', penName: 'Quiet Heron' },
-    { uid: 'f', penName: 'Fern' },
-  ]
-
   it('cuts text into plain runs and mentions', () => {
     expect(splitMentions('hi @Fern, and @quiet heron!', people)).toEqual([
       { text: 'hi ' },
@@ -67,5 +80,14 @@ describe('splitMentions', () => {
   it('keeps every character', () => {
     const text = 'a @Fern b @Fern@Fern @Quiet Heron.'
     expect(splitMentions(text, people).map((s) => s.text).join('')).toBe(text)
+  })
+})
+
+describe('mentionedIn', () => {
+  it('names the people the drawing marks, the longer name winning', () => {
+    expect(mentionedIn('@Quiet Heron thank you', people)).toEqual(new Set(['qh']))
+    expect(mentionedIn('@Quiet and @quiet heron, @Fern', people)).toEqual(new Set(['q', 'qh', 'f']))
+    expect(mentionedIn('@Quiet Hour', people)).toEqual(new Set(['q']))
+    expect(mentionedIn('no one here', people)).toEqual(new Set())
   })
 })

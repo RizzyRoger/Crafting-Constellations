@@ -35,6 +35,11 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/groups/$(gid)/posts/$(pid)).data.status == 'published';
     }
     function isStr(v, min, max) { return v is string && v.size() >= min && v.size() <= max; }
+    // Ids of new writing: letters and digits, as addDoc makes them (20 of them). Functions
+    // join a path's ids with '~' for its queue and notice ids, so a post named
+    // 'P~comments~C' would take over comment C's review entry and its reports, and a
+    // long one would make ids over Firestore's 1500 bytes: never reported, nor replied to.
+    function plainId(id) { return id.matches('^[A-Za-z0-9]{1,40}$'); }
     function nd() { return request.resource.data; }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
 
@@ -108,7 +113,7 @@ service cloud.firestore {
 
       match /messages/{mid} {
         allow read: if signedIn() && (isAdmin() || (isMember(gid) && visible()));
-        allow create: if canWrite() && verified() && isMember(gid)
+        allow create: if canWrite() && verified() && plainId(mid) && isMember(gid)
           && newContent(['authorUid', 'text', 'status', 'createdAt', 'mentions'],
                         ['authorUid', 'text', 'status', 'createdAt'])
           && isStr(nd().text, 1, 1000) && mentionsOk();
@@ -118,7 +123,7 @@ service cloud.firestore {
 
       match /posts/{pid} {
         allow read: if signedIn() && (isAdmin() || (isMember(gid) && visible()));
-        allow create: if canWrite() && verified() && isMember(gid)
+        allow create: if canWrite() && verified() && plainId(pid) && isMember(gid)
           && newContent(['authorUid', 'title', 'body', 'status', 'createdAt', 'mentions'],
                         ['authorUid', 'body', 'status', 'createdAt'])
           && isStr(nd().body, 1, 4000)
@@ -129,7 +134,7 @@ service cloud.firestore {
 
         match /comments/{cid} {
           allow read: if signedIn() && (isAdmin() || (isMember(gid) && visible()));
-          allow create: if canWrite() && verified() && isMember(gid) && postPublished(gid, pid)
+          allow create: if canWrite() && verified() && plainId(cid) && isMember(gid) && postPublished(gid, pid)
             && newContent(['authorUid', 'text', 'status', 'createdAt', 'mentions'],
                           ['authorUid', 'text', 'status', 'createdAt'])
             && isStr(nd().text, 1, 1000) && mentionsOk();
@@ -159,17 +164,23 @@ service cloud.firestore {
     match /connections/{pairId} {
       // Lists can't bind {pairId}; query with uids array-contains me
       allow read: if signedIn() && me() in resource.data.uids;
-      allow create: if canWrite() && verified() && hasProfile()
-        && nd().keys().hasOnly(['uids', 'requester', 'recipient', 'status', 'createdAt', 'updatedAt'])
+      allow create: if canWrite() && hasProfile()
         && nd().requester == me()
         && nd().recipient is string && nd().recipient != me()
         && nd().uids is list && nd().uids.size() == 2
         && nd().uids[0] < nd().uids[1]
         && me() in nd().uids && nd().recipient in nd().uids
         && pairId == nd().uids[0] + '_' + nd().uids[1]
-        && nd().status == 'pending'
         && nd().createdAt == request.time && nd().updatedAt == request.time
-        && exists(/databases/$(database)/documents/users/$(nd().recipient));
+        && exists(/databases/$(database)/documents/users/$(nd().recipient)) && (
+          // reach out
+          (verified() && nd().status == 'pending'
+            && nd().keys().hasOnly(['uids', 'requester', 'recipient', 'status', 'createdAt', 'updatedAt']))
+          // block outright, with no connection yet (a stranger who keeps pinging you): no
+          // confirmed email needed, and only the fields any other block has
+          || (nd().status == 'blocked' && nd().blockedBy == me()
+            && nd().keys().hasOnly(['uids', 'requester', 'recipient', 'status', 'blockedBy', 'createdAt', 'updatedAt']))
+        );
       allow update: if canWrite() && me() in resource.data.uids && nd().updatedAt == request.time && (
           // accept: recipient only
           (verified() && resource.data.status == 'pending' && resource.data.recipient == me()
@@ -200,7 +211,7 @@ service cloud.firestore {
 
       match /messages/{mid} {
         allow read: if verified() && isParticipant() && visible();
-        allow create: if canWrite() && verified() && isParticipant()
+        allow create: if canWrite() && verified() && plainId(mid) && isParticipant()
           && get(/databases/$(database)/documents/connections/$(pairId)).data.status == 'accepted'
           && newContent(['authorUid', 'text', 'status', 'createdAt'],
                         ['authorUid', 'text', 'status', 'createdAt'])
@@ -226,7 +237,7 @@ service cloud.firestore {
           return me() in get(/databases/$(database)/documents/chats/$(chatId)).data.uids;
         }
         allow read: if verified() && inChat() && visible();
-        allow create: if canWrite() && verified() && inChat()
+        allow create: if canWrite() && verified() && plainId(mid) && inChat()
           && newContent(['authorUid', 'text', 'status', 'createdAt', 'mentions'],
                         ['authorUid', 'text', 'status', 'createdAt'])
           && isStr(nd().text, 1, 1000) && mentionsOk();
@@ -251,6 +262,9 @@ service cloud.firestore {
     }
 
     // ---------- professional applications ----------
+    // A slot, or a reapplication's slot in the folder named for the decision it answers
+    // (storage.rules); the folder is a whole millisecond count
+    function docName(f) { return f is string && f.matches('([0-9]{1,16}/)?doc-[1-5]'); }
     function appFieldsValid() {
       let d = nd();
       return isStr(d.legalName, 2, 120)
@@ -259,7 +273,12 @@ service cloud.firestore {
         && isStr(d.licenseRegion, 2, 80)
         && isStr(d.licenseNumber, 2, 60)
         && d.files is list && d.files.size() >= 1 && d.files.size() <= 5
-        && d.files.hasOnly(['doc-1', 'doc-2', 'doc-3', 'doc-4', 'doc-5'])
+        // Rules can't loop, so each of the five places is checked in turn
+        && docName(d.files[0])
+        && (d.files.size() < 2 || docName(d.files[1]))
+        && (d.files.size() < 3 || docName(d.files[2]))
+        && (d.files.size() < 4 || docName(d.files[3]))
+        && (d.files.size() < 5 || docName(d.files[4]))
         && (!('statement' in d) || isStr(d.statement, 0, 1000))
         && d.status == 'submitted'
         && d.submittedAt == request.time;
@@ -272,10 +291,14 @@ service cloud.firestore {
                                 'licenseNumber', 'files', 'statement', 'submittedAt'])
         && nd().uid == me()
         && appFieldsValid();
+      // A resubmission replaces the doc, so it drops the last review's fields;
+      // it may clear them but never set them
       allow update: if canWrite() && verified() && me() == uid
-        && resource.data.status in ['submitted', 'denied']
+        && resource.data.status in ['submitted', 'denied', 'revoked']
         && changed().hasOnly(['status', 'legalName', 'licenseType', 'licenseRegion',
-                              'licenseNumber', 'files', 'statement', 'submittedAt'])
+                              'licenseNumber', 'files', 'statement', 'submittedAt',
+                              'reviewedAt', 'reviewedBy', 'reviewNote'])
+        && !nd().keys().hasAny(['reviewedAt', 'reviewedBy', 'reviewNote'])
         && appFieldsValid();
       allow delete: if false;
     }

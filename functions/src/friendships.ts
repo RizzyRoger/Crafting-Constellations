@@ -6,15 +6,20 @@ import { db, snapshotOf } from './app.js'
 const ALREADY_EXISTS = 6
 
 // Accepted connections are public on the constellation ("who is friends with
-// who"); requests and blocks stay private to the two people.
-export const mirrorFriendshipOf = async (pairId: string, after: FirebaseFirestore.DocumentData | undefined) => {
-  const ref = db.doc(`friendships/${pairId}`)
-  if (after?.status === 'accepted') {
-    await ref.set({ uids: after.uids, since: after.updatedAt ?? FieldValue.serverTimestamp() })
-  } else {
-    await ref.delete()
-  }
-}
+// who"); requests and blocks stay private to the two people. Events can come
+// late, out of order or retried, so this mirrors the connection as it is now,
+// read in the transaction: a block made meanwhile lands after this write, and
+// its own event takes the line away.
+export const mirrorFriendshipOf = (pairId: string) =>
+  db.runTransaction(async (tx) => {
+    const connection = (await tx.get(db.doc(`connections/${pairId}`))).data()
+    const ref = db.doc(`friendships/${pairId}`)
+    if (connection?.status === 'accepted') {
+      tx.set(ref, { uids: connection.uids, since: connection.updatedAt ?? FieldValue.serverTimestamp() })
+    } else {
+      tx.delete(ref)
+    }
+  })
 
 // The person who reached out hears when a request is accepted. The id names
 // that acceptance, so a retry can't add a second notice or mark it unread again.
@@ -41,7 +46,6 @@ export const noticeOnAccept = async (pairId: string, before: string | undefined,
 }
 
 export const mirrorFriendship = onDocumentWritten('connections/{pairId}', async (event) => {
-  const after = event.data?.after.data()
-  await mirrorFriendshipOf(event.params.pairId, after)
-  await noticeOnAccept(event.params.pairId, event.data?.before.data()?.status, after)
+  await mirrorFriendshipOf(event.params.pairId)
+  await noticeOnAccept(event.params.pairId, event.data?.before.data()?.status, event.data?.after.data())
 })

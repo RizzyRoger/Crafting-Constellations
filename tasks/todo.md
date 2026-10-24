@@ -1,5 +1,75 @@
 # Crafting Constellations — web app (Firebase)
 
+## Bug sweep, looped until dry (2026-10-10)
+
+Baseline: typecheck, functions build, unit 133, rules 48, deleteAccount e2e 5, local-backend e2e 11 (emulators on ports +20000, beside the main checkout's suite).
+
+- [ ] Each round: parallel finders by area and by cross-cutting lens → dedupe against everything already judged → 2 skeptics per finding (tiebreaker on a split) → fix confirmed bugs in disjoint file groups, with tests → adversarial review of each fix → all suites
+- [ ] Stop when a full round confirms nothing new
+
+### Round 1 (synced with main at 76900df first)
+
+- 15 finders: 133 raw findings → 85 unique → 79 confirmed, 6 refuted.
+- Refuted, and left as they are:
+  - a block doesn't reach into group chats a mutual friend makes (blocks are one-to-one by design);
+  - chat names use the pen-name rules (documented in ae096f1);
+  - the client's call timer starts after the write lands (the TTL still does its job);
+  - the wide-screen person sheet floats over the chart (deliberate);
+  - the chart briefly renders before memberships arrive (no visible harm);
+  - a banned person's token can read private notes until it expires (bans stop writing; reads stay one-to-one).
+- Fixed in 45 groups with file locks; each fix got an adversarial review (and up to two repairs) before it counted.
+  - All 79 confirmed bugs fixed, plus 19 follow-ups (F1–F19) that reviewers verified while reviewing; one was a regression (Report's confirmation stopped being announced in talk).
+  - After the last review, a narrower clause split still lost five disguised crisis lines the original code caught; the reviewer's tested fix keeps the old clause lines and adds the tighter split on top (with a regression test).
+  - Checks: unit 133 → 826; rules 48 → 69; functions e2e 5 → 22; local-backend e2e 11 → 34; `tsc -b`, functions build and `vite build` clean.
+  - For the PR: existing pen names that the tighter reserved-word and lookalike checks now refuse (e.g. "nurse2joy") must be renamed at the next profile save; the form says why.
+  - Interruptions: the session dropped several times. Workflow resume only replays an unbroken prefix of finished calls, so each restart rebuilt every group's state from the agent journals and relaunched with explicit starting points (review, repair or finish).
+  - Found while fixing: `npm run build` (`tsc -b`) broke once tests under `src/` imported components. They now have their own `tsconfig.test.json` (DOM + Node + Vite types), and `src/lib/blocks.ts` no longer pulls browser code into the Node project.
+  - Left as they are: an unreachable "withdraw refused" alert in `Item.tsx` (the item unmounts first; harmless), and the per-pair block race (the first to block owns the pair; a limit of the existing design, and victims are still better off).
+- Decisions made:
+  - a revoked professional may apply again;
+  - the profile note's hint now says everyone signed in can see it (no data move);
+  - removing a moderator revokes their sign-in, with no new rules lookup (the delay that remains is documented);
+  - Performance Monitoring's addresses are described truthfully.
+
+### Round 2 (after merging main's daily check-in, e1fd46a)
+
+- 17 finders (round 1's areas, main's check-in, and one reading round 1's whole diff for regressions), told everything already judged: 94 raw findings → 57 unique → 51 confirmed, 6 refuted.
+- About a quarter are main's new daily check-in (a refused listener on the auto-join, leaving undone at once, answers going to a group nobody is told about, the prompt collapsing conversation pages); the rest are follow-ons to round 1's fixes and smaller things round 1 didn't reach.
+- Refuted, and left as they are:
+  - the check-in group exists only where the seed makes it (a documented manual step for the live project);
+  - "Not now" on the check-in lasts for the visit (designed that way);
+  - naming a crisis line counts as crisis language (the documented policy);
+  - a spaced "Md" in a pen name reads as a title;
+  - catch-up after a restart judges one note per person slightly out of order (not worth the complexity);
+  - an unrefreshable token at page open (the SDK keeps the user; no visible harm).
+- Fixed in 18 groups, the same way as round 1; all 18 approved, a few with parts left in files the group didn't own.
+  - Reviewers' leftovers became follow-ups G1–G11, three of them required:
+    - `moderate.ts` must read contact details from the new `digits` view (9 tests red until then);
+    - the rules must accept a reapplication's document folder;
+    - the site must know the new "paused" approval outcome.
+  - Also decided: names that start with dotted initials ("D.R. Patel") are ordinary names; a trailing credential or a "Dr" title is still refused.
+- Decisions made:
+  - leaving Daily check-in lasts until the next visit;
+  - the check-in form says who reads the answers;
+  - the prompt stays off pages that fill the shell, or stays out of their way.
+
+### Round 3
+
+- 17 finders (part of the run was cut off by a spend limit and resumed): 56 raw → 51 unique → 44 confirmed, 7 refuted.
+- Two are high:
+  - this sweep's own moderation fixes added regex lookbehinds to code that ships in the site, so the whole site fails to parse on Safari 15.4–16.3;
+  - the flood hold treated ordinary conversations (more than 8 lines in 10 minutes) as spam.
+- The rest are mostly focus and announcement polish, edge cases in moderator decisions, and follow-ons to round 2.
+- Fixed in 16 groups, then follow-ups H1–H6 and K2–K3 from the reviews:
+  - a flood rule that held caregivers' updates and thank-yous;
+  - e2e tests the fixes had broken;
+  - "Withdrawn" announced;
+  - crisis resources for a crisis chat name;
+  - re-fetching page chunks after a rollback;
+  - two regex leftovers.
+- Decided: T10 (stop treating plain fear of dying as crisis language) is dropped. Five reviews in a row found real crisis lines its exemptions let through. Holding an ordinary line, with resources shown, is the safer failure, so those lines are held as before.
+- The project folder moved to `~/Desktop/code/Hyphen_hacks` mid-round; the worktree was repaired in place (`git worktree repair`) with nothing lost.
+
 ## Notifications, @mentions, seamless paper, draggable chart (2026-10-10)
 
 Plan: `/Users/darren/.claude/plans/i-want-you-to-quiet-stardust.md`
@@ -67,7 +137,7 @@ Plan: `/Users/darren/.claude/plans/can-you-add-full-eager-metcalfe.md`
 - [x] 1. Functions foundation: `options.ts` (global options that actually apply), `callable()` with the App Check flag
 - [x] 2. Account deletion (server): `accountPolicy` + tests, `account.ts` purge, `likes.uid` index, hardening
 - [x] 3. App Check in the client, typed env
-- [x] 4. Analytics + Performance, opt-in, route patterns only
+- [x] 4. Analytics + Performance, opt-in; Analytics gets route patterns only (Performance sends real addresses, corrected in the 2026-10 bug sweep)
 - [x] 5. Account deletion (client): `/delete-account`, links from Me and Onboarding
 - [x] 6. Go-live config (prod alias + web.app CORS origin wait for the project id): env files, CORS, hosting cache headers, deploy scripts, env check; remove `CNAME`
 - [x] 7. Docs: README, lessons
@@ -75,7 +145,7 @@ Plan: `/Users/darren/.claude/plans/can-you-add-full-eager-metcalfe.md`
 - [ ] 9. With the user: console setup, keys, deploy (Spark now; Blaze later)
   - [x] Project `crafting-constellations-bf029`; web config in `.env.local`; `prod` alias; moderator list
   - [x] Firestore `(default)` in nam5; rules + indexes deployed
-  - [x] Hosting live at https://crafting-constellations-bf029.web.app. Checked: headers, deep links, no Analytics before consent, route patterns only after.
+  - [x] Hosting live at https://crafting-constellations-bf029.web.app. Checked: headers, deep links, no Analytics before consent, route patterns only after (Analytics; Performance sends real addresses).
   - [x] App Check dropped (user's call): site key cleared; code stays, gated off
   - [ ] User: custom domain craftingconstellations.com (Hosting → Add custom domain; Namecheap DNS)
   - [ ] User: upgrade to Blaze, set a budget alert, then Storage → Get started (US-CENTRAL1)

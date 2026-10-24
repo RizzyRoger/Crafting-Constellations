@@ -1,6 +1,6 @@
 import { FieldValue, type DocumentReference, type Query } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
-import { confirmMatches, isRecentSignIn, pairOfDmPath, underPath } from './accountPolicy.js'
+import { confirmMatches, isPairOf, isRecentSignIn, pairOfDmPath, underPath } from './accountPolicy.js'
 import { auth, db, logAction, storage } from './app.js'
 import { callable } from './options.js'
 
@@ -21,7 +21,8 @@ const deleteTrees = async (refs: DocumentReference[]) => {
 }
 
 // Everything a person leaves behind, except moderation evidence (bans, the
-// audit log, reports others filed). Safe to run again after a partial failure.
+// audit log, reports others filed, pen names a moderator retired: those hold
+// no uid, so they stay blocked). Safe to run again after a partial failure.
 export const purgeAccount = async (uid: string) => {
   // 1. Cut off writing first: rules need a membership, a connection, a chat seat or a profile
   const [memberships, connections, friendships, penNames, threadDocs, chats] = await Promise.all([
@@ -41,8 +42,9 @@ export const purgeAccount = async (uid: string) => {
   const posts = await refsOf(db.collectionGroup('posts').where('authorUid', '==', uid))
   await deleteTrees(posts)
 
-  // 3. Private threads, both sides. Their own lines also find threads that have no thread doc yet.
-  const [comments, messages, likes, reports, queued, pings] = await Promise.all([
+  // 3. Private threads, both sides. Their own lines also find threads that have no thread doc yet, and
+  // the list of threads (which names those too) finds one holding only the other person's undelivered lines
+  const [comments, messages, likes, reports, queued, pings, threadIds] = await Promise.all([
     refsOf(db.collectionGroup('comments').where('authorUid', '==', uid)),
     refsOf(db.collectionGroup('messages').where('authorUid', '==', uid)),
     refsOf(db.collectionGroup('likes').where('uid', '==', uid)),
@@ -50,12 +52,14 @@ export const purgeAccount = async (uid: string) => {
     refsOf(db.collection('modQueue').where('authorUid', '==', uid)),
     // Mentions, comments and acceptances they caused in other people's notifications
     refsOf(db.collectionGroup('notices').where('actorUid', '==', uid)),
+    db.collection('dms').listDocuments(),
   ])
   const pairs = [
     ...new Set([
       ...connections.map((ref) => ref.id),
       ...threadDocs.map((ref) => ref.id),
       ...messages.map((ref) => pairOfDmPath(ref.path)).filter((pair): pair is string => pair !== undefined),
+      ...threadIds.map((ref) => ref.id).filter((pair) => isPairOf(pair, uid)),
     ]),
   ]
   const threads = await deleteTrees(pairs.map((pair) => db.doc(`dms/${pair}`)))
@@ -101,7 +105,8 @@ export const deleteAccount = onCall<{ confirm?: string }>(
 
     const [user, profile, ban] = await Promise.all([auth.getUser(uid), db.doc(`users/${uid}`).get(), db.doc(`bans/${uid}`).get()])
     if (user.customClaims?.admin === true) throw new HttpsError('failed-precondition', 'admin', { problem: 'admin' })
-    if (!isRecentSignIn(request.auth?.token.auth_time)) throw new HttpsError('failed-precondition', 'recent-login', { problem: 'recent-login' })
+    // Timed on the server's clock (the read time), like auth_time: the local backend's may be off
+    if (!isRecentSignIn(request.auth?.token.auth_time, profile.readTime.toMillis() / 1000)) throw new HttpsError('failed-precondition', 'recent-login', { problem: 'recent-login' })
     if (ban.exists) throw new HttpsError('permission-denied', 'paused', { problem: 'paused' })
     if (!confirmMatches(request.data?.confirm, profile.data()?.penNameLower)) {
       throw new HttpsError('invalid-argument', 'confirm', { problem: 'confirm' })
@@ -111,6 +116,9 @@ export const deleteAccount = onCall<{ confirm?: string }>(
     await auth.deleteUser(uid).catch((error: { code?: string }) => {
       if (error.code !== 'auth/user-not-found') throw error
     })
+    // Once the profile goes, a tab left open is sent to choose a pen name, and while Auth still knew
+    // them saveProfile let it. Nothing can now (it asks Auth), so whatever that let them do goes too
+    if ((await db.doc(`users/${uid}`).get()).exists) await purgeAccount(uid)
     await logAction(uid, 'deleteAccount', uid, counts)
     return { ok: true }
   },

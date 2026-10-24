@@ -1,7 +1,7 @@
 import { FieldValue, type DocumentReference } from 'firebase-admin/firestore'
 import { onDocumentCreated } from 'firebase-functions/v2/firestore'
 import { db, kindOf, queueIdFor, snapshotOf, textOf, type ContentKind } from './app.js'
-import { applyFlood } from './moderation/flood.js'
+import { judgePace } from './moderation/flood.js'
 import { moderate } from './moderation/index.js'
 import { applyNotices, NO_NOTICES, planNotices } from './notify.js'
 
@@ -10,6 +10,7 @@ import { applyNotices, NO_NOTICES, planNotices } from './notify.js'
 // - crisis in a DM / chat → published with `crisis: true` (everyone in it sees resources), queued at priority 2
 // - crisis elsewhere      → held for a person to read; the author sees resources
 // - anything else flagged → held, queued for review
+// - DM, no longer connected → held, marked `undelivered` for its writer (and queued if flagged)
 // - author banned or gone → removed (gone: deleted their account while this was in flight)
 // Whatever is delivered pings the people picked with @ and, for a comment, the post's writer.
 export const handleNewContent = async (ref: DocumentReference) => {
@@ -22,14 +23,23 @@ export const handleNewContent = async (ref: DocumentReference) => {
     if (!data || data.status !== 'pending') return
 
     const authorUid: string = data.authorUid
+    const segments = ref.path.split('/')
+    const pairId = kind === 'dm' ? segments[1] : undefined
+    const chatId = kind === 'chatMessage' ? segments[1] : undefined
     const rateRef = db.doc(`rateLimits/${authorUid}`)
-    const [userSnap, banSnap, rateSnap] = await Promise.all([
+    const [userSnap, banSnap, rateSnap, connection] = await Promise.all([
       tx.get(db.doc(`users/${authorUid}`)),
       tx.get(db.doc(`bans/${authorUid}`)),
       tx.get(rateRef),
+      pairId ? tx.get(db.doc(`connections/${pairId}`)) : undefined,
     ])
     const now = FieldValue.serverTimestamp()
-    const { flooded, stamps } = applyFlood(rateSnap.data()?.stamps, Date.now())
+    // Paced by when it was written (createdAt is the server's time, held by the rules), so a
+    // backlog the local backend catches up on after downtime isn't taken for a burst
+    const writtenAt: number = data.createdAt?.toMillis?.() ?? Date.now()
+    const text = textOf(data)
+    // Talk and replies are paced as texting, posts more slowly, each in its own log
+    const paced = judgePace(kind, rateSnap.data(), { writtenAt, place: ref.parent.path, text })
 
     if (banSnap.exists || !userSnap.exists) {
       tx.update(ref, { status: 'removed', removedBy: 'automod', removedAt: now })
@@ -38,22 +48,24 @@ export const handleNewContent = async (ref: DocumentReference) => {
 
     const author = snapshotOf(authorUid, userSnap.data())
 
-    const text = textOf(data)
     const privateThread = kind === 'dm' || kind === 'chatMessage'
     const verdict = moderate(text, { context: privateThread ? 'private' : 'public' })
-    const floodHold = flooded && verdict.action === 'publish' && !verdict.crisis
+    const floodHold = (paced.flooded || paced.repeated) && verdict.action === 'publish' && !verdict.crisis
     const action = floodHold ? 'hold' : verdict.action
     const categories = floodHold ? [...verdict.categories, 'spam'] : verdict.categories
-    const matches = floodHold ? [...verdict.matches, { category: 'spam' as const, term: 'too many notes' }] : verdict.matches
+    const floodTerm = paced.flooded ? 'too many notes' : 'the same note again'
+    const matches = floodHold ? [...verdict.matches, { category: 'spam' as const, term: floodTerm }] : verdict.matches
     const crisisOnly = verdict.crisis && verdict.categories.every((c) => c === 'selfHarm')
-    const deliver = action === 'publish' || (privateThread && crisisOnly)
-    const segments = ref.path.split('/')
-    const pairId = kind === 'dm' ? segments[1] : undefined
-    const chatId = kind === 'chatMessage' ? segments[1] : undefined
+    // A note was written while the two were connected, but may have waited since (the backend
+    // off, a retry): as with Approve, it goes out only while they still are. A chat line still
+    // goes out after its writer leaves: leaving is theirs, and a goodbye sent just before should land
+    const reachable = !pairId || connection?.data()?.status === 'accepted'
+    const deliver = reachable && (action === 'publish' || (privateThread && crisisOnly))
 
-    // Its reads go before any write (a transaction rule), so the stamps are set after
+    // Its reads go before any write (a transaction rule), so the logs are set after, merged to
+    // keep the other pace's
     const notices = deliver ? await planNotices(tx, ref.path, data, author) : NO_NOTICES
-    tx.set(rateRef, { stamps, updatedAt: now })
+    tx.set(rateRef, { ...paced.logs, updatedAt: now }, { merge: true })
 
     if (deliver) {
       tx.update(ref, {
@@ -69,7 +81,14 @@ export const handleNewContent = async (ref: DocumentReference) => {
       }
       if (chatId) tx.update(db.doc(`chats/${chatId}`), { lastMessageAt: now, lastAuthorUid: authorUid })
     } else {
-      tx.update(ref, { status: 'held', heldReason: verdict.crisis ? 'crisis' : 'review', author })
+      tx.update(ref, {
+        status: 'held',
+        // Why a person will read it; clean writing that only can't reach them has none
+        ...(action === 'hold' ? { heldReason: verdict.crisis ? 'crisis' : 'review' } : {}),
+        // Its writer sees it won't arrive
+        ...(reachable ? {} : { undelivered: true }),
+        author,
+      })
     }
 
     if (action === 'hold') {

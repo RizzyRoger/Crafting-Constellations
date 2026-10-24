@@ -1,8 +1,10 @@
 import { FieldValue } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
-import { db, PIGMENTS } from './app.js'
+import { auth, db, PIGMENTS } from './app.js'
+import { userOrNone } from './localBackendPolicy.js'
 import { checkPenName, moderate, suggestPenName, tidyPenName } from './moderation/index.js'
 import { callable } from './options.js'
+import { mayRelease } from './profilePolicy.js'
 
 interface SaveProfileInput {
   penName?: string
@@ -23,18 +25,23 @@ const pickFreeName = async () => {
 export const saveProfile = onCall<SaveProfileInput>(callable(), async (request) => {
   const uid = request.auth?.uid
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.')
-  if ((await db.doc(`bans/${uid}`).get()).exists) throw new HttpsError('permission-denied', 'This account is paused.')
+  const [ban, user] = await Promise.all([db.doc(`bans/${uid}`).get(), userOrNone(auth.getUser(uid))])
+  if (ban.exists) throw new HttpsError('permission-denied', 'This account is paused.')
+  // A token outlives the account it was made for, up to an hour: ask Auth, as the local backend
+  // does, so a tab left open after deleting the account can't make it a profile again
+  if (!user || user.disabled) throw new HttpsError('unauthenticated', 'Sign in first.')
 
   const input = request.data ?? {}
   const userRef = db.doc(`users/${uid}`)
-  const current = (await userRef.get()).data()
+  // Only to know whether to pick them a name: the transaction reads the profile itself
+  const hasProfile = (await userRef.get()).exists
 
   let penName: string | undefined
   if (typeof input.penName === 'string') {
     const check = checkPenName(input.penName)
     if (!check.ok) throw new HttpsError('invalid-argument', 'pen-name', { problem: check.problem })
     penName = check.value
-  } else if (!current) {
+  } else if (!hasProfile) {
     penName = await pickFreeName()
   }
 
@@ -53,14 +60,20 @@ export const saveProfile = onCall<SaveProfileInput>(callable(), async (request) 
     throw new HttpsError('invalid-argument', 'pigment')
   }
 
-  await db.runTransaction(async (tx) => {
+  const saved = await db.runTransaction(async (tx) => {
+    // Read here, not before: a moderator's reset that lands first is seen (or makes this
+    // retry), so the name it left them is the one a rename frees, never the one it retired
+    const current = (await tx.get(userRef)).data()
     const lower = penName ? tidyPenName(penName).toLowerCase() : undefined
     const nameRef = lower ? db.doc(`penNames/${lower}`) : undefined
-    const owner = nameRef ? (await tx.get(nameRef)).data()?.uid : undefined
-    if (owner && owner !== uid) throw new HttpsError('already-exists', 'pen-name', { problem: 'taken' })
-
     const oldLower = typeof current?.penNameLower === 'string' ? current.penNameLower : undefined
-    if (nameRef && oldLower && oldLower !== lower) tx.delete(db.doc(`penNames/${oldLower}`))
+    const oldRef = nameRef && oldLower && oldLower !== lower ? db.doc(`penNames/${oldLower}`) : undefined
+    const [claim, oldClaim] = await Promise.all([nameRef, oldRef].map(async (ref) => (ref ? (await tx.get(ref)).data() : undefined)))
+    // A name a moderator retired (Reset profile) has no owner, and nobody gets it back
+    if (claim?.retired === true) throw new HttpsError('invalid-argument', 'pen-name', { problem: 'unkind' })
+    if (claim?.uid && claim.uid !== uid) throw new HttpsError('already-exists', 'pen-name', { problem: 'taken' })
+
+    if (oldRef && mayRelease(oldClaim, uid)) tx.delete(oldRef)
     if (nameRef) tx.set(nameRef, { uid })
 
     const now = FieldValue.serverTimestamp()
@@ -77,7 +90,8 @@ export const saveProfile = onCall<SaveProfileInput>(callable(), async (request) 
       },
       { merge: true },
     )
+    return penName ?? current?.penName
   })
 
-  return { ok: true, crisis, penName: penName ?? current?.penName }
+  return { ok: true, crisis, penName: saved }
 })

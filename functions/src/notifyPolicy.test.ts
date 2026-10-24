@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { splitMentions } from './moderation/index.js'
 import { acceptedWhileAway, commentRecipient, MISSED_ACCEPT_MS, pickMentioned, requestedMentions, type Reader } from './notifyPolicy.js'
 
 const reader = (uid: string, penName: string | undefined, patch: Partial<Reader> = {}): Reader => ({
@@ -22,6 +23,10 @@ describe('requestedMentions', () => {
     expect(requestedMentions(undefined, 'me')).toEqual([])
     expect(requestedMentions([1, null, '', 'x'.repeat(129), 'ok'], 'me')).toEqual(['ok'])
   })
+
+  it('drops anything that is not a plain uid, so no document path can be built from it', () => {
+    expect(requestedMentions(['a/b', 'x/y/z', '../c', '.', '..', 'a//b', '__x__', 'ok_1-2', 'synth01'], 'me')).toEqual(['ok_1-2', 'synth01'])
+  })
 })
 
 describe('pickMentioned', () => {
@@ -29,6 +34,7 @@ describe('pickMentioned', () => {
     [
       reader('fern', 'Fern'),
       reader('heron', 'Quiet Heron'),
+      reader('quiet', 'Quiet'),
       reader('left', 'Left Group', { canRead: false }),
       reader('blocked', 'Blocked One', { blocked: true }),
       reader('banned', 'Paused One', { banned: true }),
@@ -54,6 +60,21 @@ describe('pickMentioned', () => {
 
   it('only pings people the writer picked, even if another name appears', () => {
     expect(pickMentioned('@Fern @Quiet Heron', ['fern'], readers)).toEqual([{ uid: 'fern', penName: 'Fern' }])
+  })
+
+  it('pings only the longer name when one picked name starts another, as the words are drawn', () => {
+    expect(pickMentioned('@Quiet Heron thank you', ['quiet', 'heron'], readers)).toEqual([{ uid: 'heron', penName: 'Quiet Heron' }])
+    expect(pickMentioned('@Quiet and @Quiet Heron', ['quiet', 'heron'], readers)).toEqual([
+      { uid: 'quiet', penName: 'Quiet' },
+      { uid: 'heron', penName: 'Quiet Heron' },
+    ])
+  })
+
+  it('falls back to the shorter name when the longer one can’t be pinged, and draws it that way', () => {
+    const heronLeft = new Map([...readers, ['heron', reader('heron', 'Quiet Heron', { canRead: false })]])
+    const mentioned = pickMentioned('@Quiet Heron', ['quiet', 'heron'], heronLeft)
+    expect(mentioned).toEqual([{ uid: 'quiet', penName: 'Quiet' }])
+    expect(splitMentions('@Quiet Heron', mentioned)).toEqual([{ text: '@Quiet', uid: 'quiet' }, { text: ' Heron' }])
   })
 })
 

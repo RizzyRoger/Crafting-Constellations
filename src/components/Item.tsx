@@ -1,14 +1,15 @@
-import { doc, updateDoc } from 'firebase/firestore'
-import type { ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { useAuth } from '../auth/AuthProvider'
-import { db } from '../lib/firebase'
+import { focusForNow } from '../lib/focusForNow'
+import { isFirstClick } from '../lib/groupStanding'
 import { ago } from '../lib/time'
 import type { AuthorSnapshot, Content } from '../lib/types'
+import { canWithdraw, withdraw } from '../lib/withdraw'
 import { Blot } from '../wash/Blot'
 import { CrisisCard } from './CrisisCard'
 import { Report } from './Report'
 import { StatusNote } from './StatusNote'
-import { Who } from './Who'
+import { Licensed, Who } from './Who'
 
 interface ItemProps {
   item: Content
@@ -20,46 +21,86 @@ interface ItemProps {
   variant?: 'plain' | 'bubble' | 'card' | 'comment'
   // Private threads deliver crisis messages and show resources to both people
   privateThread?: boolean
+  // The page's own status (Said): withdrawn writing goes, and anything said inside it goes too
+  say?: (text: string) => void
 }
 
 // One piece of writing: who, when, its state, the words, and quiet actions
-export const Item = ({ item, me, children, actions, blotSize = 24, className = '', variant = 'plain', privateThread = false }: ItemProps) => {
+export const Item = ({ item, me, children, actions, blotSize = 24, className = '', variant = 'plain', privateThread = false, say }: ItemProps) => {
   const { profile } = useAuth()
+  const [refused, setRefused] = useState<string | null>(null)
+  const bar = useRef<HTMLDivElement>(null)
   const mine = item.authorUid === me
   const author: AuthorSnapshot | undefined =
     item.author ?? (mine && profile ? { penName: profile.penName, avatarSeed: profile.avatarSeed, pigment: profile.pigment, pro: profile.pro } : undefined)
 
-  const withdraw = () => updateDoc(doc(db, item.path), { status: 'withdrawn' })
+  // Withdrawn writing drops out of the list at once, taking the focused button with it, so focus
+  // goes first to what stays around it: the conversation, the comments, or the page
+  const takeBack = async () => {
+    const around = bar.current?.closest<HTMLElement>('[role="region"], section, main')
+    if (around) focusForNow(around, { preventScroll: true })
+    setRefused(null)
+    const refusal = await withdraw(item.path)
+    setRefused(refusal)
+    if (!refusal) say?.('Withdrawn.')
+  }
 
   const foot = (
-    <div className="item__actions">
+    <div ref={bar} className="item__actions">
       {actions}
       {mine ? (
-        <button type="button" className="link-btn" onClick={() => void withdraw()}>
-          Withdraw
-        </button>
+        // Already withdrawn or removed: the rules refuse it again
+        canWithdraw(item.status) && (
+          // Withdrawn writing drops out of the list at once, so only a first click (or a key) acts: the
+          // second click of a double-click would land on the next of mine and take it back for good
+          <button
+            type="button"
+            className="link-btn"
+            onClick={(e) => {
+              if (isFirstClick(e.detail)) void takeBack()
+            }}
+          >
+            Withdraw
+          </button>
+        )
       ) : (
         item.status === 'published' && <Report contentPath={item.path} me={me} />
+      )}
+      {refused && (
+        <span className="error" role="alert">
+          {refused}
+        </span>
       )}
     </div>
   )
 
   const crisis = (
     <>
-      {mine && item.status === 'held' && item.heldReason === 'crisis' && <CrisisCard audience="writer" held />}
+      {/* Undelivered writing never reaches others, so its card keeps the resources but not 'before others see it' */}
+      {mine && item.status === 'held' && item.heldReason === 'crisis' && <CrisisCard audience="writer" held={!item.undelivered} />}
       {privateThread && item.crisis && <CrisisCard audience={mine ? 'writer' : 'reader'} />}
     </>
+  )
+
+  // The blot is decorative, so talk and comments name the writer in words too
+  const who = author ? <Who person={author} showBlot={false} /> : <span className="who__name">Someone</span>
+  const blot = author ? (
+    <Blot seed={author.avatarSeed} pigment={author.pigment} size={blotSize} />
+  ) : (
+    <span className="bubble__fallback" aria-hidden="true" />
   )
 
   if (variant === 'bubble') {
     return (
       <article className={`bubble ${mine ? 'bubble--out' : 'bubble--in'} item--${item.status} ${className}`}>
-        {author ? (
-          <Blot seed={author.avatarSeed} pigment={author.pigment} size={blotSize} />
-        ) : (
-          <span className="bubble__fallback" aria-hidden="true" />
-        )}
+        {blot}
         <div className="bubble__box">
+          {/* My bubbles sit on the right without my name; a screen reader hears it instead */}
+          {mine && <span className="visually-hidden">You</span>}
+          <div className="item__head">
+            {mine ? author?.pro && <Licensed /> : who}
+            {mine && <StatusNote item={item} />}
+          </div>
           {children}
           {foot}
         </div>
@@ -86,12 +127,12 @@ export const Item = ({ item, me, children, actions, blotSize = 24, className = '
   if (variant === 'comment') {
     return (
       <article className={`comment-row item--${item.status} ${className}`}>
-        {author ? (
-          <Blot seed={author.avatarSeed} pigment={author.pigment} size={blotSize} />
-        ) : (
-          <span className="bubble__fallback" aria-hidden="true" />
-        )}
+        {blot}
         <div className="comment-row__bar">
+          <div className="item__head">
+            {who}
+            {mine && <StatusNote item={item} />}
+          </div>
           {children}
           {foot}
         </div>

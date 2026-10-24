@@ -31,6 +31,9 @@ export interface Content {
   createdAt: Timestamp | null
   author?: AuthorSnapshot
   heldReason?: 'crisis' | 'review'
+  // Held for good: it can't reach them (no longer connected, or its writer's account paused).
+  // Set by functions as it arrives or when a moderator approves it
+  undelivered?: boolean
   crisis?: boolean
   // People pinged with @, checked and attached by functions on publish
   mentioned?: { uid: string; penName: string }[]
@@ -93,6 +96,7 @@ export interface Chat {
 export interface Notice {
   id: string
   type: 'crisis' | 'held' | 'removed' | 'proApproved' | 'proDenied' | 'mention' | 'comment' | 'accepted'
+  // The writing it's about; for 'removed', users/{uid} when a moderator reset their profile instead
   contentPath?: string
   // When that writing was made: how the page finds it again (mention / comment)
   contentAt?: Timestamp
@@ -115,10 +119,24 @@ export interface QueueItem {
   authorPenName: string
   snapshot: { title?: string; text: string }
   automod?: { categories: string[]; crisis: boolean; matches: { category: string; term: string }[] }
-  reports?: { count: number; reasons: string[] }
+  // The reports since a moderator last decided; reporterUids are who they came from, never shown
+  reports?: { count: number; reasons: string[]; reporterUids?: string[] }
   delivered?: boolean
   priority: number
   state: 'open' | 'resolved'
+  createdAt: Timestamp | null
+  // When a moderator last decided on it, if it has come back since
+  resolvedAt?: Timestamp | null
+}
+
+// A report as filed (Report.tsx). Only moderators can read them
+export interface FiledReport {
+  id: string
+  reporterUid: string
+  contentPath: string
+  reason: string
+  // What they wrote under 'Anything else'
+  details?: string
   createdAt: Timestamp | null
 }
 
@@ -132,5 +150,7 @@ export interface ProApplication {
   statement?: string
   files: string[]
   submittedAt: Timestamp | null
+  // The last decision's time, which names a reapplication's folder (reapplyRound)
+  reviewedAt?: Timestamp | null
   reviewNote?: string
 }

@@ -2,23 +2,28 @@ import { checkPenName, PEN_NAME_HINTS, type PenNameProblem } from '@moderation'
 import { FirebaseError } from 'firebase/app'
 import { collection, query, where } from 'firebase/firestore'
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
+import { CrisisCard } from '../components/CrisisCard'
 import { PageHead } from '../components/PageHead'
 import { Who } from '../components/Who'
 import { createChat, describeError, problemOf } from '../lib/callables'
+import { useCurrentPath } from '../lib/currentPath'
 import { db } from '../lib/firebase'
 import { useQueryData } from '../lib/live'
 import { otherInPair } from '../lib/pair'
+import { hereOf } from '../lib/returnTo'
 import type { Connection, Profile } from '../lib/types'
 import { HEAD_DESCENDING } from '../wash/strokes'
 
 // Matches functions/src/chats.ts
 const MAX_CHAT_PEOPLE = 20
 
-// Chat names pass the same checks as pen names; only some hints read differently
+// Chat names pass the pen-name checks in their chat form, as functions/src/chats.ts
+// does, so the hint matches the server; some hints read differently
 const NAME_HINTS: Record<PenNameProblem, string> = {
   ...PEN_NAME_HINTS,
+  mixed: 'Keep each word to one alphabet, so no letter can pass for another.',
   contact: 'No emails or long numbers.',
   reserved: 'Choose a name that doesn’t suggest a title or role.',
 }
@@ -30,14 +35,20 @@ const errorText = (error: unknown) => {
   return describeError(error)
 }
 
+// A name the server refuses for crisis language brings the resources too, as the live check does:
+// the server's moderation can be newer than the site's
+const errorOf = (error: unknown) => ({ text: errorText(error), crisis: problemOf(error) === 'crisis' })
+
 // Start a private group chat with people you're already connected with
 export const NewChat = () => {
   const { uid, claims } = useMe()
   const navigate = useNavigate()
+  const location = useLocation()
+  const currentPath = useCurrentPath()
   const [name, setName] = useState('')
   const [picked, setPicked] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<ReturnType<typeof errorOf> | null>(null)
 
   const connections = useQueryData<Connection>(`connections|${uid}`, () =>
     query(collection(db, 'connections'), where('uids', 'array-contains', uid)),
@@ -50,22 +61,31 @@ export const NewChat = () => {
     .filter((p): p is Profile => Boolean(p) && !p!.banned)
     .sort((a, b) => a.penName.localeCompare(b.penName))
 
-  const check = checkPenName(name)
+  // Someone who drops off the list meanwhile (disconnected, blocked or banned) has no box left to
+  // untick, so only the people still on it are counted and asked
+  const chosen = picked.filter((id) => friends.some((p) => p.id === id))
+
+  const check = checkPenName(name, { chat: true })
   const hint = name.trim() && !check.ok ? NAME_HINTS[check.problem] : null
-  const full = picked.length >= MAX_CHAT_PEOPLE - 1
+  // A name that holds crisis language is refused like any other, but the resources come with it
+  const crisis = (!check.ok && check.problem === 'crisis') || error?.crisis === true
+  const full = chosen.length >= MAX_CHAT_PEOPLE - 1
 
   const toggle = (id: string) => setPicked((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]))
 
   const start = async (event: FormEvent) => {
     event.preventDefault()
-    if (!check.ok || picked.length === 0) return
+    if (!check.ok || chosen.length === 0) return
+    const from = location.pathname
     setBusy(true)
     setError(null)
     try {
-      const { id } = await createChat({ name: check.value, uids: picked })
-      navigate(`/chats/${id}`)
+      const { id } = await createChat({ name: check.value, uids: chosen })
+      // A slow start can outlast the visit: gone elsewhere by then, they stay where they chose,
+      // and the new chat shows in the rail
+      if (currentPath() === from) navigate(`/chats/${id}`)
     } catch (e) {
-      setError(errorText(e))
+      setError(errorOf(e))
       setBusy(false)
     }
   }
@@ -86,7 +106,7 @@ export const NewChat = () => {
         {head}
         <div className="banner">
           <p className="pencil note">Private chats open once your email is confirmed.</p>
-          <Link to="/verify" className="act act--wash" style={{ justifySelf: 'start' }}>
+          <Link to="/verify" state={{ from: hereOf(location) }} className="act act--wash" style={{ justifySelf: 'start' }}>
             Confirm email
           </Link>
         </div>
@@ -107,7 +127,7 @@ export const NewChat = () => {
         </div>
 
         <fieldset className="stack" style={{ gap: 10, border: 0, padding: 0, margin: 0 }}>
-          <legend className="code">People ({picked.length} of up to {MAX_CHAT_PEOPLE - 1})</legend>
+          <legend className="code">People ({chosen.length} of up to {MAX_CHAT_PEOPLE - 1})</legend>
           {connections.loading || people.loading ? (
             <p className="meta">Finding your people…</p>
           ) : friends.length === 0 ? (
@@ -124,10 +144,18 @@ export const NewChat = () => {
           )}
         </fieldset>
 
-        {error && <p className="error">{error}</p>}
+        {error && (
+          <p className="error" role="alert">
+            {error.text}
+          </p>
+        )}
+        {/* Mounted from the start: screen readers often skip a polite region that arrives already holding its news */}
+        <div className="stack live" aria-live="polite">
+          {crisis && <CrisisCard audience="writer" />}
+        </div>
 
         <div className="row">
-          <button type="submit" className="act act--wash" disabled={busy || !check.ok || picked.length === 0}>
+          <button type="submit" className="act act--wash" disabled={busy || !check.ok || chosen.length === 0}>
             {busy ? 'Starting…' : 'Start chat'}
           </button>
         </div>

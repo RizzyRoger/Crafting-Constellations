@@ -1,20 +1,26 @@
+import { FirebaseError } from 'firebase/app'
 import { GoogleAuthProvider, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup } from 'firebase/auth'
 import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { describeError } from '../lib/callables'
+import { usePausedNote } from '../auth/pausedNote'
+import { describeError, resetRefusal } from '../lib/callables'
 import { auth } from '../lib/firebase'
+import { returnTo } from '../lib/returnTo'
 import { trackSignIn } from '../lib/telemetry'
 import { AuthLayout } from './AuthLayout'
 
 export const SignIn = () => {
   const navigate = useNavigate()
   const location = useLocation()
-  const next = (location.state as { from?: string } | null)?.from ?? '/constellation'
+  const next = returnTo(location.state)
+  const paused = usePausedNote()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  // Signed out mid-visit by a pause: say why in the words a refused sign-in gets
+  const shown = error ?? (paused ? describeError(new FirebaseError('auth/user-disabled', 'Paused by a moderator')) : null)
 
   const signIn = async (event: FormEvent) => {
     event.preventDefault()
@@ -41,11 +47,20 @@ export const SignIn = () => {
   }
 
   const reset = async () => {
+    // Emptied first, so a second press is announced again
+    setNote(null)
     if (!email.trim()) {
       setError('Write your email above first.')
       return
     }
-    await sendPasswordResetEmail(auth, email.trim()).catch(() => undefined)
+    // An older error would sit beside the note that a link is on its way
+    setError(null)
+    // A request that didn't go through says why, unless the reason would tell whether the email has an account
+    const refusal = await sendPasswordResetEmail(auth, email.trim()).then(() => null, resetRefusal)
+    if (refusal) {
+      setError(refusal)
+      return
+    }
     setNote('If that email has an account, a reset link is on its way.')
   }
 
@@ -67,8 +82,15 @@ export const SignIn = () => {
             onChange={(e) => setPassword(e.target.value)}
           />
         </div>
-        {error && <p className="error">{error}</p>}
-        {note && <p className="hint">{note}</p>}
+        {shown && (
+          <p className="error" role="alert">
+            {shown}
+          </p>
+        )}
+        {/* Mounted from the start, so screen readers announce the note when it lands */}
+        <p className="hint live" role="status">
+          {note}
+        </p>
         <div className="row">
           <button type="submit" className="act act--wash" disabled={busy}>
             {busy ? 'Signing in…' : 'Sign in'}
@@ -84,7 +106,7 @@ export const SignIn = () => {
           </button>
         </div>
         <p className="code">
-          New here? <Link to="/signup">Make a pen name</Link>
+          New here? <Link to="/signup" state={location.state}>Make a pen name</Link>
         </p>
       </form>
     </AuthLayout>

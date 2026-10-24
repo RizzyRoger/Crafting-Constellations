@@ -1,7 +1,8 @@
 import { moderate, type Context } from '@moderation'
 import { useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from 'react'
+import { crisisOnly } from '../../functions/src/moderation/delivery'
 import { describeError } from '../lib/callables'
-import { insertMention, keptMentions, matchPeople, mentionQuery } from '../lib/mentions'
+import { imeKey, insertMention, keptMentions, matchPeople, mentionQuery, picksIn } from '../lib/mentions'
 import type { Profile } from '../lib/types'
 import { Blot } from '../wash/Blot'
 
@@ -55,14 +56,19 @@ export const Composer = ({
   const [dismissed, setDismissed] = useState<number | null>(null)
   const [picked, setPicked] = useState<ReadonlyMap<string, string>>(new Map())
   const field = useRef<HTMLTextAreaElement>(null)
+  const sendButton = useRef<HTMLButtonElement>(null)
   const nextCaret = useRef<number | null>(null)
+  // The words as they stand, for a send that lands after more was typed
+  const draft = useRef({ text, title })
   const id = useId()
   const listId = `${id}-people`
   const expanded = expandable && open
   const bar = shape === 'bar' || expandable
 
   const preview = useMemo(() => (text.trim() ? moderate(`${title}\n${text}`, { context }) : null), [text, title, context])
-  const mayWait = preview?.action === 'hold' && !(context === 'private' && preview.crisis)
+  // As the server decides: private writing with crisis language alone goes out; anything else flagged too, it waits
+  const mayWait = preview?.action === 'hold' && !(context === 'private' && crisisOnly(preview))
+  const waitNote = mayWait ? 'This may wait for a person to read it before others see it.' : ''
 
   const query = people && people.length > 0 ? mentionQuery(text, caret) : null
   const matches = query && query.start !== dismissed && people ? matchPeople(people, query.query) : []
@@ -75,6 +81,10 @@ export const Composer = ({
     field.current.focus()
     field.current.setSelectionRange(nextCaret.current, nextCaret.current)
     nextCaret.current = null
+  })
+
+  useLayoutEffect(() => {
+    draft.current = { text, title }
   })
 
   const pick = (person: Mentionable) => {
@@ -92,15 +102,30 @@ export const Composer = ({
     event.preventDefault()
     const body = text.trim()
     if (!body || sending) return
+    // Send is disabled while the words are on their way, and again once they've gone, which drops
+    // focus out of the page. Pressed, it hands focus to the field, where Ctrl+Enter leaves it
+    if (sendButton.current && document.activeElement === sendButton.current) field.current?.focus()
+    const sent = { text, title }
     setSending(true)
     setError(null)
     try {
       await onSubmit(body, withTitle && title.trim() ? title.trim() : undefined, keptMentions(body, picked))
-      setText('')
-      setTitle('')
-      setPicked(new Map())
-      setDismissed(null)
-      setOpen(false)
+      // Anything typed while it was on its way is the next message: take off only the words that
+      // went. Typed after them, the rest stays; if they were changed, the whole field does
+      const now = draft.current
+      const rest = now.text.startsWith(sent.text) ? now.text.slice(sent.text.length).trimStart() : now.text
+      const cut = now.text.length - rest.length
+      const titleWent = now.title === sent.title
+      if (cut > 0) {
+        setText(rest)
+        // A new value puts the caret at its end
+        setCaret(rest.length)
+      }
+      // Keep only the picks still named in what's left, and a closed list's @ where it now stands
+      setPicked((m) => picksIn(rest, m))
+      setDismissed((at) => (rest && at !== null && at >= cut ? at - cut : null))
+      if (titleWent) setTitle('')
+      if (!rest && titleWent) setOpen(false)
     } catch (e) {
       setError(describeError(e))
     } finally {
@@ -109,6 +134,8 @@ export const Composer = ({
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter, arrows and Escape confirm or steer an IME's composition, not the list
+    if (imeKey(e.nativeEvent)) return
     if (listOpen && query) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
@@ -202,19 +229,29 @@ export const Composer = ({
       <div className="composer__foot">
         {!bar && (
           <span className="hint" aria-live="polite">
-            {mayWait ? 'This may wait for a person to read it before others see it.' : ''}
+            {waitNote}
           </span>
         )}
-        <button type="submit" className={bar ? 'composer__send' : 'act act--wash'} disabled={disabled || sending || !text.trim()}>
+        <button
+          ref={sendButton}
+          type="submit"
+          className={bar ? 'composer__send' : 'act act--wash'}
+          disabled={disabled || sending || !text.trim()}
+        >
           {sending ? 'Sending…' : submitLabel}
         </button>
       </div>
-      {bar && mayWait && (
-        <p className="hint" aria-live="polite">
-          This may wait for a person to read it before others see it.
+      {/* Mounted from the start, so screen readers announce the note when it lands */}
+      {bar && (
+        <p className="hint live" aria-live="polite">
+          {waitNote}
         </p>
       )}
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </form>
   )
 }

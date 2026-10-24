@@ -1,6 +1,9 @@
 // @mentions: "@Pen Name" in writing, matched against the people picked for it.
-// Pen names are letters, numbers, spaces and . ' - (see penName.ts), so a name
-// may hold spaces; it ends where the next character can't continue a word.
+// Pen names are letters (with their combining marks), numbers, spaces and
+// . ' - (see penName.ts), so a name may hold spaces; it ends where the next
+// character can't continue a word. A vowel sign (Hindi, Tamil, Thai) is a mark
+// that continues one; the selector or keycap after an emoji is a mark that
+// doesn't.
 // Shared: functions decide who is pinged, the client draws the highlight.
 
 // Must match firestore.rules (mentions list on new writing)
@@ -16,7 +19,7 @@ export interface MentionSegment {
   uid?: string
 }
 
-const WORD = /[\p{L}\p{N}]/u
+const WORD = /[\p{L}\p{N}]|(?!\p{Default_Ignorable_Code_Point})[\p{Mn}\p{Mc}]/u
 
 const continuesWord = (char: string | undefined) => char !== undefined && WORD.test(char)
 
@@ -58,3 +61,8 @@ export const splitMentions = (text: string, people: readonly Mentioned[]): Menti
   if (plainFrom < text.length) segments.push({ text: text.slice(plainFrom) })
   return segments
 }
+
+// Who the words really mention, by the same rule the drawing uses, so a pick
+// whose name only starts a longer one ("@Quiet" in "@Quiet Heron") is left out
+export const mentionedIn = (text: string, people: readonly Mentioned[]) =>
+  new Set(splitMentions(text, people).flatMap((s) => (s.uid ? [s.uid] : [])))

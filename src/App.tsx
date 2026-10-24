@@ -6,7 +6,9 @@ import { ConsentNote } from './components/ConsentNote'
 import { PageViews } from './components/PageViews'
 import { PencilDefs } from './components/PencilDefs'
 import { Quiet } from './components/Quiet'
+import { RouteError } from './components/RouteError'
 import { Shell } from './components/Shell'
+import { loadPage } from './lib/release'
 import { AdminClaim } from './pages/AdminClaim'
 import { Chat } from './pages/Chat'
 import { Constellation } from './pages/Constellation'
@@ -26,8 +28,9 @@ import { SignUp } from './pages/SignUp'
 import { Thread } from './pages/Thread'
 import { Verify } from './pages/Verify'
 
-// Moderators only: kept out of everyone else's first download
-const Admin = lazy(() => import('./pages/Admin').then((m) => ({ default: m.Admin })))
+// Moderators only: kept out of everyone else's first download. A tab opened before a deploy
+// asks for the old file, so it reloads once for the new release
+const Admin = lazy(() => loadPage(() => import('./pages/Admin')).then((m) => ({ default: m.Admin })))
 
 const Root = () => (
   <AuthProvider>
@@ -47,9 +50,11 @@ const Inside = () => (
   </Gate>
 )
 
-const routes: RouteObject[] = [
+export const routes: RouteObject[] = [
   {
     element: <Root />,
+    // Anything that fails outside the rail (sign-in, the shell itself)
+    errorElement: <RouteError alone />,
     children: [
       { path: '/', element: <Landing /> },
       { path: '/signin', element: <SignIn /> },
@@ -61,26 +66,32 @@ const routes: RouteObject[] = [
       {
         element: <Inside />,
         children: [
-          { path: '/constellation', element: <Constellation /> },
-          { path: '/groups/:groupId', element: <Group /> },
-          { path: '/groups/:groupId/posts/:postId', element: <PostPage /> },
-          { path: '/messages', element: <Messages /> },
-          { path: '/messages/:pairId', element: <Thread /> },
-          { path: '/chats/new', element: <NewChat /> },
-          { path: '/chats/:chatId', element: <Chat /> },
-          { path: '/me', element: <Me /> },
-          { path: '/notifications', element: <Notifications /> },
-          { path: '/professional', element: <Professional /> },
-          { path: '/admin/claim', element: <AdminClaim /> },
           {
-            path: '/admin',
-            element: (
-              <Gate need="admin">
-                <Suspense fallback={<Quiet>Opening the review sheet…</Quiet>}>
-                  <Admin />
-                </Suspense>
-              </Gate>
-            ),
+            // A page that fails (code gone after a deploy, an address that can't be read) keeps the rail
+            errorElement: <RouteError />,
+            children: [
+              { path: '/constellation', element: <Constellation /> },
+              { path: '/groups/:groupId', element: <Group /> },
+              { path: '/groups/:groupId/posts/:postId', element: <PostPage /> },
+              { path: '/messages', element: <Messages /> },
+              { path: '/messages/:pairId', element: <Thread /> },
+              { path: '/chats/new', element: <NewChat /> },
+              { path: '/chats/:chatId', element: <Chat /> },
+              { path: '/me', element: <Me /> },
+              { path: '/notifications', element: <Notifications /> },
+              { path: '/professional', element: <Professional /> },
+              { path: '/admin/claim', element: <AdminClaim /> },
+              {
+                path: '/admin',
+                element: (
+                  <Gate need="admin">
+                    <Suspense fallback={<Quiet>Opening the review sheet…</Quiet>}>
+                      <Admin />
+                    </Suspense>
+                  </Gate>
+                ),
+              },
+            ],
           },
         ],
       },

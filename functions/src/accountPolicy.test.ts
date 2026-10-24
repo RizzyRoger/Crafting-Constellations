@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { confirmMatches, isRecentSignIn, pairOfDmPath, RECENT_SIGN_IN_SECONDS, underPath } from './accountPolicy.js'
+import { confirmMatches, isPairOf, isRecentSignIn, pairOfDmPath, RECENT_SIGN_IN_SECONDS, underPath } from './accountPolicy.js'
 
 describe('isRecentSignIn', () => {
   const now = 1_800_000_000
@@ -20,6 +20,10 @@ describe('confirmMatches', () => {
   it('matches the pen name regardless of case and spacing', () => {
     expect(confirmMatches('Quiet Heron', 'quiet heron')).toBe(true)
     expect(confirmMatches('  quiet   HERON ', 'quiet heron')).toBe(true)
+  })
+
+  it('matches a curly apostrophe against the plain one', () => {
+    expect(confirmMatches('O’Neil', "o'neil")).toBe(true)
   })
 
   it('refuses a different name, an empty answer, or a non-string', () => {
@@ -60,5 +64,19 @@ describe('pairOfDmPath', () => {
 
   it('ignores group talk', () => {
     expect(pairOfDmPath('groups/g1/messages/m1')).toBeUndefined()
+  })
+})
+
+describe('isPairOf', () => {
+  it('finds either person in a private thread', () => {
+    expect(isPairOf('alice_bob', 'alice')).toBe(true)
+    expect(isPairOf('alice_bob', 'bob')).toBe(true)
+  })
+
+  it('needs the whole uid, and a thread of two', () => {
+    expect(isPairOf('alice_bob', 'al')).toBe(false)
+    expect(isPairOf('alice_bob', 'alice_bob')).toBe(false)
+    expect(isPairOf('alice', 'alice')).toBe(false)
+    expect(isPairOf('alice_bob_carol', 'alice')).toBe(false)
   })
 })

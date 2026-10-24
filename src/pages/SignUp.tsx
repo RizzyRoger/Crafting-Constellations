@@ -1,6 +1,6 @@
 import { createUserWithEmailAndPassword, GoogleAuthProvider, sendEmailVerification, signInWithPopup } from 'firebase/auth'
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { describeError } from '../lib/callables'
 import { auth } from '../lib/firebase'
 import { trackSignIn } from '../lib/telemetry'
@@ -8,6 +8,8 @@ import { AuthLayout } from './AuthLayout'
 
 export const SignUp = () => {
   const navigate = useNavigate()
+  // Carries the page they were opening through to the pen name, and on from there
+  const { state } = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -25,7 +27,7 @@ export const SignUp = () => {
       const credential = await createUserWithEmailAndPassword(auth, email.trim(), password)
       trackSignIn(credential, 'password')
       await sendEmailVerification(credential.user).catch(() => undefined)
-      navigate('/onboarding')
+      navigate('/onboarding', { state })
     } catch (e) {
       setError(describeError(e))
     } finally {
@@ -37,7 +39,7 @@ export const SignUp = () => {
     setError(null)
     try {
       trackSignIn(await signInWithPopup(auth, new GoogleAuthProvider()), 'google')
-      navigate('/onboarding')
+      navigate('/onboarding', { state })
     } catch (e) {
       setError(describeError(e))
     }
@@ -65,7 +67,11 @@ export const SignUp = () => {
             onChange={(e) => setPassword(e.target.value)}
           />
         </div>
-        {error && <p className="error">{error}</p>}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
         <div className="row">
           <button type="submit" className="act act--wash" disabled={busy}>
             {busy ? 'Creating…' : 'Continue'}
@@ -78,7 +84,7 @@ export const SignUp = () => {
           </button>
         </div>
         <p className="code">
-          Already here? <Link to="/signin">Sign in</Link>
+          Already here? <Link to="/signin" state={state}>Sign in</Link>
         </p>
       </form>
     </AuthLayout>

@@ -149,11 +149,19 @@ export const Landing = () => {
   const { user, profile } = useAuth()
   // Just deleted their account (see DeleteAccount)
   const left = (useLocation().state as { left?: boolean } | null)?.left === true
+  const leftRef = useRef<HTMLParagraphElement>(null)
   const studiesRef = useRef<HTMLElement>(null)
   const dotsRef = useRef<HTMLElement>(null)
   const reduce = reducedMotion()
   const [studies, setStudies] = useState(reduce ? 1 : 0)
   const [dots, setDots] = useState(reduce ? 1 : 0)
+
+  // The Delete button that had focus went with its page, so focus is nowhere. Bring it to the
+  // note, which screen readers then read: a status region that arrives already holding its words
+  // often isn't announced
+  useEffect(() => {
+    if (left) leftRef.current?.focus()
+  }, [left])
 
   useEffect(() => {
     if (reduce) return
@@ -196,7 +204,7 @@ export const Landing = () => {
       </div>
 
       {left && (
-        <p className="landing__left pencil note" role="status">
+        <p ref={leftRef} tabIndex={-1} className="landing__left pencil note" role="status">
           Your account and your writing have been removed.
         </p>
       )}

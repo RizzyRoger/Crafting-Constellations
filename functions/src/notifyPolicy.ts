@@ -1,15 +1,17 @@
-import { hasMention, MAX_MENTIONS, type Mentioned } from './moderation/index.js'
+import { MAX_MENTIONS, mentionedIn, type Mentioned } from './moderation/index.js'
 
 // Firebase-free rules for who a newly published piece of writing pings,
 // kept apart so they can be unit tested
 
-// The uids a writer picked: strings, no repeats, never themself, at most MAX_MENTIONS
+// Letters, digits, _ and -, and not one of Firestore's reserved __ids__. Each pick
+// becomes part of a document path, and anything else (a '/') would make the
+// publishing transaction throw on every retry.
+const UID = /^(?!__.*__$)[\w-]{1,128}$/
+
+// The uids a writer picked: uid-shaped strings, no repeats, never themself, at most MAX_MENTIONS
 export const requestedMentions = (raw: unknown, authorUid: string): string[] =>
   Array.isArray(raw)
-    ? [...new Set(raw.filter((uid): uid is string => typeof uid === 'string' && uid.length > 0 && uid.length <= 128 && uid !== authorUid))].slice(
-        0,
-        MAX_MENTIONS,
-      )
+    ? [...new Set(raw.filter((uid): uid is string => typeof uid === 'string' && UID.test(uid) && uid !== authorUid))].slice(0, MAX_MENTIONS)
     : []
 
 // What the publishing transaction read about one person
@@ -27,12 +29,16 @@ export interface Reader {
 const reachable = (reader: Reader | undefined): reader is Reader & { penName: string } =>
   Boolean(reader?.penName) && !reader!.banned && reader!.canRead && !reader!.blocked
 
-// Pinged: picked by the writer, named in the words, and still someone who can read it
-export const pickMentioned = (text: string, requested: readonly string[], readers: ReadonlyMap<string, Reader>): Mentioned[] =>
-  requested.flatMap((uid) => {
+// Pinged: picked by the writer, still someone who can read it, and named in the
+// words as they will be drawn (the longer of two overlapping names wins)
+export const pickMentioned = (text: string, requested: readonly string[], readers: ReadonlyMap<string, Reader>): Mentioned[] => {
+  const picked = requested.flatMap((uid) => {
     const reader = readers.get(uid)
-    return reachable(reader) && hasMention(text, reader.penName) ? [{ uid, penName: reader.penName }] : []
+    return reachable(reader) ? [{ uid, penName: reader.penName }] : []
   })
+  const named = mentionedIn(text, picked)
+  return picked.filter((p) => named.has(p.uid))
+}
 
 // A post's writer hears about a comment, unless they wrote it, can't read it, or are already pinged in it
 export const commentRecipient = (postAuthor: Reader | undefined, commenterUid: string, mentioned: readonly Mentioned[]) =>

@@ -21,7 +21,8 @@ import {
   where,
   type Firestore,
 } from 'firebase/firestore'
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { blockOf } from '../../src/lib/blocks'
 
 const PROJECT_ID = 'demo-crafting-constellations'
 const GROUP = 'groups/g1'
@@ -223,6 +224,73 @@ describe('connections', () => {
     await assertSucceeds(getDocs(query(collection(carl(), 'connections'), where('uids', 'array-contains', 'carl'))))
     await assertFails(getDoc(doc(bob(), `connections/${r.id}`)))
   })
+
+  // A stranger in a group can @mention you or comment on your posts with no connection, and
+  // only a block stops the pings, so it can't wait on a request or a confirmed email
+  describe('blocking someone with no connection', () => {
+    it('anyone with a profile can block a stranger outright, confirmed or not', async () => {
+      const b = blockOf('una', 'carl')
+      await assertSucceeds(setDoc(doc(una(), `connections/${b.id}`), b.data))
+      const a = blockOf('alice', 'carl')
+      await assertSucceeds(setDoc(doc(alice(), `connections/${a.id}`), a.data))
+    })
+
+    it('only in their own name, between the right pair, and with nothing extra', async () => {
+      const b = blockOf('una', 'carl')
+      const withFields = (data: Record<string, unknown>) => setDoc(doc(una(), `connections/${b.id}`), { ...b.data, ...data })
+      await assertFails(withFields({ blockedBy: 'carl' }))
+      await assertFails(withFields({ requester: 'carl', recipient: 'una' }))
+      await assertFails(withFields({ note: 'pestering me' }))
+      await assertFails(withFields({ status: 'accepted' }))
+      await assertFails(setDoc(doc(una(), 'connections/una_carl'), b.data))
+      const other = blockOf('bob', 'carl')
+      await assertFails(setDoc(doc(una(), `connections/${other.id}`), other.data))
+    })
+
+    it('not when banned, without a profile, or against someone with no profile', async () => {
+      const b = blockOf('bea', 'carl')
+      await assertFails(setDoc(doc(banned(), `connections/${b.id}`), b.data))
+      const n = blockOf('nobody', 'carl')
+      await assertFails(setDoc(doc(as('nobody', { email_verified: false }), `connections/${n.id}`), n.data))
+      const g = blockOf('una', 'ghost')
+      await assertFails(setDoc(doc(una(), `connections/${g.id}`), g.data))
+    })
+
+    it('opens nothing else: an unconfirmed person still cannot reach out, and nobody starts as friends', async () => {
+      const u = request('una', 'carl')
+      await assertFails(setDoc(doc(una(), `connections/${u.id}`), u.data))
+      await assertFails(setDoc(doc(una(), `connections/${u.id}`), { ...u.data, status: 'accepted' }))
+      await assertFails(setDoc(doc(alice(), 'connections/alice_carl'), { ...request('alice', 'carl').data, status: 'accepted' }))
+    })
+
+    it('shows the blocked person no more than a block made after a request', async () => {
+      const r = request('alice', 'carl')
+      await assertSucceeds(setDoc(doc(alice(), `connections/${r.id}`), r.data))
+      await assertSucceeds(updateDoc(doc(alice(), `connections/${r.id}`), { status: 'blocked', blockedBy: 'alice', updatedAt: serverTimestamp() }))
+      const b = blockOf('una', 'carl')
+      await assertSucceeds(setDoc(doc(una(), `connections/${b.id}`), b.data))
+
+      const later = (await getDoc(doc(carl(), `connections/${r.id}`))).data() ?? {}
+      const outright = (await getDoc(doc(carl(), `connections/${b.id}`))).data() ?? {}
+      expect(Object.keys(outright).sort()).toEqual(Object.keys(later).sort())
+    })
+
+    it('only the blocker lifts it; the other person cannot undo or turn it', async () => {
+      const b = blockOf('una', 'carl')
+      await assertSucceeds(setDoc(doc(una(), `connections/${b.id}`), b.data))
+      await assertFails(deleteDoc(doc(carl(), `connections/${b.id}`)))
+      await assertFails(updateDoc(doc(carl(), `connections/${b.id}`), { status: 'accepted', updatedAt: serverTimestamp() }))
+      await assertFails(setDoc(doc(carl(), `connections/${b.id}`), blockOf('carl', 'una').data))
+      await assertSucceeds(deleteDoc(doc(una(), `connections/${b.id}`)))
+    })
+
+    it('cannot be laid over a connection that is already there', async () => {
+      // carl blocked una first: writing una's own block over it would let una lift carl's
+      await seed((db) => setDoc(doc(db, 'connections/carl_una'), { ...blockOf('carl', 'una').data, createdAt: new Date(), updatedAt: new Date() }))
+      await assertFails(setDoc(doc(una(), 'connections/carl_una'), blockOf('una', 'carl').data))
+      await assertFails(deleteDoc(doc(una(), 'connections/carl_una')))
+    })
+  })
 })
 
 describe('friendships', () => {
@@ -306,6 +374,55 @@ describe('private group chats', () => {
   it('chat notes can be reported', async () => {
     const report = { reporterUid: 'alice', contentPath: `${CHAT}/messages/m1`, reason: 'harassment', createdAt: serverTimestamp() }
     await assertSucceeds(setDoc(doc(collection(alice(), 'reports')), report))
+  })
+})
+
+// Functions join a path's ids with '~' for its review-queue and notice ids, so a post
+// named 'pub~comments~c1' would take over comment c1's queue entry and its reports
+describe('ids of new writing', () => {
+  const places = [
+    [`${GROUP}/posts`, { body: 'see https://example.com' }],
+    [`${GROUP}/posts/pub/comments`, { text: 'x' }],
+    [`${GROUP}/messages`, { text: 'x' }],
+    ['dms/alice_bob/messages', { text: 'x' }],
+    ['chats/c1/messages', { text: 'x' }],
+  ] as const
+
+  beforeEach(() =>
+    seed(async (db) => {
+      await setDoc(doc(db, 'connections/alice_bob'), { uids: ['alice', 'bob'], requester: 'alice', recipient: 'bob', status: 'accepted' })
+      await setDoc(doc(db, 'chats/c1'), { name: 'Tuesday soup', uids: ['alice', 'bob'], createdBy: 'alice' })
+    }),
+  )
+
+  it('auto-ids and plain picked ids still work everywhere', async () => {
+    for (const [path, fields] of places) {
+      await assertSucceeds(setDoc(doc(collection(alice(), path)), pending('alice', fields)))
+      await assertSucceeds(setDoc(doc(alice(), `${path}/p1`), pending('alice', fields)))
+    }
+  })
+
+  it('a post cannot be named after a comment’s path', async () => {
+    await assertFails(setDoc(doc(alice(), `${GROUP}/posts/pub~comments~c1`), pending('alice', { body: 'see https://example.com' })))
+  })
+
+  it('refuses the separator, or anything but letters and digits, everywhere', async () => {
+    for (const [path, fields] of places) {
+      for (const id of ['a~b', '~', 'a%7Eb', 'a-b']) {
+        await assertFails(setDoc(doc(alice(), `${path}/${id}`), pending('alice', fields)))
+      }
+    }
+  })
+
+  // A long one would make queue and notice ids over Firestore's 1500 bytes, so it could never be
+  // reported, nor anyone told of a comment on it
+  it('refuses an id longer than 40, twice what addDoc makes, everywhere', async () => {
+    for (const [path, fields] of places) {
+      await assertSucceeds(setDoc(doc(alice(), `${path}/${'a'.repeat(40)}`), pending('alice', fields)))
+      for (const id of ['a'.repeat(41), 'a'.repeat(1480)]) {
+        await assertFails(setDoc(doc(alice(), `${path}/${id}`), pending('alice', fields)))
+      }
+    }
   })
 })
 
@@ -414,6 +531,82 @@ describe('professional applications', () => {
     await assertSucceeds(getDoc(doc(alice(), 'proApplications/alice')))
     await assertSucceeds(getDoc(doc(admin(), 'proApplications/alice')))
     await assertFails(getDoc(doc(bob(), 'proApplications/alice')))
+  })
+
+  // As reviewProfessional leaves it
+  const reviewed = (status: string) =>
+    seed((db) =>
+      setDoc(doc(db, 'proApplications/alice'), {
+        ...application,
+        status,
+        submittedAt: new Date(),
+        reviewedAt: new Date(),
+        reviewedBy: 'mia',
+        reviewNote: 'The number didn’t match.',
+      }),
+    )
+
+  it('a denied or revoked applicant can apply again, which clears the last review', async () => {
+    for (const status of ['denied', 'revoked']) {
+      await reviewed(status)
+      await assertSucceeds(setDoc(doc(alice(), 'proApplications/alice'), { ...application, files: ['doc-1', 'doc-2'] }))
+    }
+  })
+
+  // A reapplication's new documents go in a folder named for the decision (reapplyRound)
+  const ROUND = '1729700000123'
+  const SLOTS = ['doc-1', 'doc-2', 'doc-3', 'doc-4', 'doc-5']
+
+  it('a reapplication can send documents in its folder, alone or with the ones sent before', async () => {
+    for (const status of ['denied', 'revoked']) {
+      for (const files of [
+        [`${ROUND}/doc-1`],
+        ['doc-1', `${ROUND}/doc-1`],
+        ['doc-1', 'doc-2', 'doc-3', 'doc-4', `${ROUND}/doc-5`],
+        // Sent after an earlier reapplication
+        [`${ROUND}/doc-1`, '1729800000456/doc-1'],
+      ]) {
+        await reviewed(status)
+        await assertSucceeds(setDoc(doc(alice(), 'proApplications/alice'), { ...application, files }))
+      }
+    }
+    // A first application still names plain slots
+    await assertSucceeds(setDoc(doc(carl(), 'proApplications/carl'), { ...application, uid: 'carl', files: SLOTS }))
+  })
+
+  it('document names stay slots, five at most', async () => {
+    await reviewed('denied')
+    await assertFails(setDoc(doc(carl(), 'proApplications/carl'), { ...application, uid: 'carl', files: ['doc-6'] }))
+    for (const files of [
+      [`${ROUND}/doc-6`],
+      ['doc-0'],
+      ['abc/doc-1'],
+      ['../x/doc-1'],
+      [`${ROUND}/doc-1/x`],
+      [`a${ROUND}/doc-1`],
+      [`/${ROUND}/doc-1`],
+      ['doc-1', 7],
+      [],
+      [...SLOTS, `${ROUND}/doc-1`],
+      // A bad name in each place a list can have
+      ...SLOTS.map((_, i) => [...SLOTS.slice(0, i), 'abc/doc-1']),
+    ]) {
+      await assertFails(setDoc(doc(alice(), 'proApplications/alice'), { ...application, files }))
+    }
+  })
+
+  it('a resubmission never sets or keeps the review, and an approved one stays put', async () => {
+    await reviewed('denied')
+    await assertFails(setDoc(doc(alice(), 'proApplications/alice'), { ...application, reviewNote: 'Looks fine' }))
+    await assertFails(setDoc(doc(alice(), 'proApplications/alice'), { ...application, files: [`${ROUND}/doc-1`], reviewNote: 'Looks fine' }))
+    await assertFails(setDoc(doc(alice(), 'proApplications/alice'), { ...application, reviewedBy: 'alice', reviewedAt: serverTimestamp() }))
+    await assertFails(updateDoc(doc(alice(), 'proApplications/alice'), { status: 'submitted', submittedAt: serverTimestamp() }))
+    await reviewed('approved')
+    await assertFails(setDoc(doc(alice(), 'proApplications/alice'), application))
+  })
+
+  it('refuses a field that is too short once trimmed', async () => {
+    await assertFails(setDoc(doc(alice(), 'proApplications/alice'), { ...application, licenseNumber: '7' }))
   })
 })
 
