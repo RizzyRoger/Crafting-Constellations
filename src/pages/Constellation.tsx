@@ -1,5 +1,5 @@
 import { collection, collectionGroup, orderBy, query, where } from 'firebase/firestore'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { Quiet } from '../components/Quiet'
@@ -41,6 +41,15 @@ export const Constellation = () => {
     if (next === 'friends') nextParams.delete('view')
     else nextParams.set('view', next)
     setParams(nextParams, { replace: true })
+  }
+
+  // The welcome's way to the groups chart goes with the welcome, which would drop focus out of the
+  // page, so focus moves first, to the Groups tab, which says where it went. A click leaves the page
+  // where it is, since the chart shows there; a key brings focus into view
+  const groupsTab = useRef<HTMLButtonElement>(null)
+  const toGroups = (e: { detail: number }) => {
+    groupsTab.current?.focus({ preventScroll: e.detail > 0 })
+    setView('groups')
   }
 
   const selectPerson = (person: string | null) => {
@@ -125,7 +134,14 @@ export const Constellation = () => {
 
       <div className="view-switch" role="tablist" aria-label="View">
         {VIEWS.map((v) => (
-          <button key={v.id} type="button" role="tab" aria-selected={view === v.id} onClick={() => setView(v.id)}>
+          <button
+            key={v.id}
+            ref={v.id === 'groups' ? groupsTab : undefined}
+            type="button"
+            role="tab"
+            aria-selected={view === v.id}
+            onClick={() => setView(v.id)}
+          >
             {v.label}
           </button>
         ))}
@@ -143,7 +159,7 @@ export const Constellation = () => {
                 seed={profile.avatarSeed || uid}
                 pigment={profile.pigment}
                 groups={groups.data.filter((group) => !myGroupIds.has(group.id))}
-                onGroups={() => setView('groups')}
+                onGroups={toGroups}
               />
             ) : (
               <EgoMap
@@ -216,7 +232,7 @@ const ChartWelcome = ({
   seed: string
   pigment: Profile['pigment']
   groups: Group[]
-  onGroups: () => void
+  onGroups: (e: { detail: number }) => void
 }) => (
   <section className="chart-welcome" aria-label="Your chart">
     <Blot seed={seed} pigment={pigment} size={72} />

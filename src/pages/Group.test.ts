@@ -97,4 +97,16 @@ describe('the group header', () => {
     state.membership = 'none'
     expect(openPosts()).toContain('Join this group')
   })
+
+  // Join and Leave are swapped for a note when pressed, and focus goes to where what they did is
+  // said. React keeps that only where it stays in the same place, so it's first in the row, empty
+  // until something's said, whatever comes after it
+  it('holds where Join or Leave is said in the same place, empty, before the button or note', () => {
+    const region = '<div class="row"><p class="meta live" role="status"></p>'
+    expect(openPosts()).toContain(`${region}<button type="button" class="link-btn">Leave group</button>`)
+    state.membership = 'pending'
+    expect(openPosts()).toContain(`${region}<span class="status-note">joining…</span>`)
+    state.membership = 'none'
+    expect(openPosts()).toContain(`${region}<button type="button" class="act act--wash">Join this group</button>`)
+  })
 })

@@ -228,3 +228,56 @@ describe('review professionals', () => {
     expect(html).toMatch(NONE_WAITING)
   })
 })
+
+// The server leaves a moderator's own case to another moderator (notTheirOwn in functions/src/admin.ts)
+const SELF = 'This is about you, so another moderator has to decide it.'
+
+describe('a moderator’s own case', () => {
+  beforeEach(() => {
+    state.queue = []
+    state.answers = new Map()
+  })
+
+  // Held by automod, so no reports, and nothing else says it's theirs
+  it('offers no decision on their own held writing, and says who decides it', () => {
+    state.queue = [{ ...entry, authorUid: 'mod' }]
+    const html = renderQueue()
+    expect(html).toContain(`<p class="meta">${SELF}</p>`)
+    expect(html).not.toMatch(/>Approve<|>Remove<|note to the writer/)
+  })
+
+  it('offers no decision on their own reported profile either', () => {
+    state.queue = [{ ...entry, kind: 'profile', authorUid: 'mod', automod: undefined, reports: { count: 1, reasons: ['other'], reporterUids: ['r'] } }]
+    const html = renderQueue()
+    expect(html).toContain(SELF)
+    expect(html).not.toMatch(/>Keep it up<|>Reset profile</)
+  })
+
+  it('still offers both on someone else’s', () => {
+    state.queue = [entry]
+    const html = renderQueue()
+    expect(html).toMatch(/>Approve<\/button>.*>Remove<\/button>/)
+    expect(html).not.toContain(SELF)
+  })
+
+  it('offers no decision on their own licence application, and still opens its documents', () => {
+    state.answers.set('admin-apps', { data: [{ ...application, id: 'mod', uid: 'mod' }] })
+    const html = render('?tab=pros')
+    expect(html).toContain(`<p class="meta">${SELF}</p>`)
+    expect(html).not.toMatch(/>Approve licence<|>Deny<|note \(optional\)/)
+    expect(html).toMatch(/>Open licence\.pdf</)
+  })
+
+  it('still offers a decision on someone else’s application', () => {
+    state.answers.set('admin-apps', { data: [application] })
+    const html = render('?tab=pros')
+    expect(html).toMatch(/>Approve licence<\/button>.*>Deny<\/button>/)
+    expect(html).not.toContain(SELF)
+  })
+
+  // The server lets a moderator take their own mark away
+  it('still lets them revoke their own licensed mark', () => {
+    state.answers.set('admin-pros', { data: [{ ...licensed, id: 'mod', penName: 'Mod' }] })
+    expect(render('?tab=pros')).toMatch(/Licensed now.*Mod.*>Revoke mark</)
+  })
+})

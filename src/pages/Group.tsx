@@ -1,5 +1,6 @@
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import { useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useMe } from '../auth/AuthProvider'
 import { Composer } from '../components/Composer'
@@ -14,6 +15,7 @@ import { Said, useSaid } from '../components/Said'
 import { Talk } from '../components/Talk'
 import { describeError } from '../lib/callables'
 import { db } from '../lib/firebase'
+import { focusForNow } from '../lib/focusForNow'
 import { isFirstClick, standingIn } from '../lib/groupStanding'
 import { useDocData, useLiveContent } from '../lib/live'
 import { useGroupPeople } from '../lib/people'
@@ -23,6 +25,9 @@ import type { Group as GroupDoc, Post, Profile } from '../lib/types'
 import { HEAD_DESCENDING } from '../wash/strokes'
 
 type Tab = 'talk' | 'posts'
+
+// What the last Join or Leave did, or why it didn't go through, with the group it was in
+type Outcome = { at: string; said?: string; error?: string }
 
 const peopleHere = (count: number | undefined) => {
   const n = count ?? 0
@@ -134,34 +139,65 @@ export const Group = () => {
   const group = useDocData<GroupDoc>(valid ? `groups/${groupId}` : null)
   const membership = useDocData<{ uid: string }>(valid ? `groups/${groupId}/members/${uid}` : null)
   const people = useGroupPeople(valid ? groupId : null, uid)
-  const [leaving, setLeaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // Which group I'm leaving: another opened from the rail meanwhile keeps this page mounted, and
+  // isn't the one being left
+  const [leaving, setLeaving] = useState<string | null>(null)
+  // Kept with its group too: another opened here starts with nothing said, and what lands late for
+  // the last one isn't said in this one
+  const [outcome, setOutcome] = useState<Outcome | null>(null)
+  if (outcome && outcome.at !== groupId) setOutcome(null)
+  const here = outcome?.at === groupId ? outcome : null
+  // The group open now, for an answer that lands after another was opened. Only the open group's
+  // answer is said, so one for a group left behind can't put out what was said here
+  const openNow = useRef(groupId)
+  openNow.current = groupId
+  const status = useRef<HTMLParagraphElement>(null)
 
   if (group.loading || membership.loading) return <Quiet>Opening the group…</Quiet>
   if (!group.data) return <Quiet>This group isn’t here any more.</Quiet>
 
-  const standing = standingIn(membership, leaving)
+  const name = group.data.name
+  const standing = standingIn(membership, leaving === groupId)
   const member = standing === 'member'
 
-  const join = async () => {
-    setError(null)
+  // Said in the group it was done in, if that's the one open when the answer lands
+  const settle = (at: string, next: Omit<Outcome, 'at'>) => {
+    if (openNow.current === at) setOutcome({ at, ...next })
+  }
+
+  // The button pressed is swapped for a note at once (joining's local write, or leaving), so focus
+  // moves first, to where what it did is said. A click leaves the page where it is; a key brings
+  // focus into view
+  const toStatus = (detail: number) => {
+    // Emptied on the page before focus comes, or the last one's words are read out for this one
+    flushSync(() => setOutcome(null))
+    if (status.current) focusForNow(status.current, { preventScroll: detail > 0 })
+  }
+
+  const join = async (detail: number) => {
+    const at = groupId
+    toStatus(detail)
     try {
-      await joinGroup(groupId, uid)
+      await joinGroup(at, uid)
+      settle(at, { said: `You joined ${name}.` })
     } catch (e) {
-      setError(describeError(e))
+      settle(at, { error: describeError(e) })
     }
   }
 
-  const leave = async () => {
-    setLeaving(true)
-    setError(null)
+  const leave = async (detail: number) => {
+    const at = groupId
+    toStatus(detail)
+    setLeaving(at)
     try {
       await new Promise((r) => setTimeout(r, 0))
-      await leaveGroup(groupId, uid)
+      await leaveGroup(at, uid)
+      settle(at, { said: `You left ${name}.` })
     } catch (e) {
-      setError(describeError(e))
+      settle(at, { error: describeError(e) })
     } finally {
-      setLeaving(false)
+      // Done, so this group shows as it now is. Another being left since is still being left
+      setLeaving((current) => (current === at ? null : current))
     }
   }
 
@@ -175,8 +211,13 @@ export const Group = () => {
         seed={groupId.length * 13}
       >
         <div className="row">
+          {/* Mounted from the start, so what Join or Leave did is heard when it lands. Before the
+              button, so Tab goes on from here to whichever is there now */}
+          <p ref={status} className="meta live" role="status">
+            {here?.said}
+          </p>
           {member ? (
-            <button type="button" className="link-btn" onClick={() => void leave()}>
+            <button type="button" className="link-btn" onClick={(e) => void leave(e.detail)}>
               Leave group
             </button>
           ) : standing === 'outside' ? (
@@ -184,7 +225,7 @@ export const Group = () => {
               type="button"
               className="act act--wash"
               onClick={(e) => {
-                if (isFirstClick(e.detail)) void join()
+                if (isFirstClick(e.detail)) void join(e.detail)
               }}
             >
               Join this group
@@ -195,9 +236,9 @@ export const Group = () => {
         </div>
       </PageHead>
 
-      {error && (
+      {here?.error && (
         <p className="error" role="alert">
-          {error}
+          {here.error}
         </p>
       )}
 

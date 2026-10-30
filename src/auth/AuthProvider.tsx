@@ -1,9 +1,10 @@
-import { onIdTokenChanged, signOut, type User } from 'firebase/auth'
+import { onIdTokenChanged, type User } from 'firebase/auth'
 import { doc, onSnapshot } from 'firebase/firestore'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, type NavigateFunction } from 'react-router-dom'
 import { auth, db } from '../lib/firebase'
 import type { Profile } from '../lib/types'
+import { leaveThenSignOut } from './useSignOut'
 
 export interface Claims {
   admin: boolean
@@ -80,6 +81,11 @@ export const listenToProfile = (uid: string, answer: (profile: Profile | null) =
     },
     () => answer(null),
   )
+
+// Someone paused while the account was open here leaves for sign-in like any sign-out (see
+// useSignOut). Not from inside the effect that saw the pause: React is still committing there, so
+// flushSync can't put the page up at once (it warns in dev). It goes as soon as the effect ends
+export const leavePaused = (navigate: NavigateFunction) => queueMicrotask(() => void leaveThenSignOut(navigate, '/signin'))
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null)
@@ -172,10 +178,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!profile || !user) return
     if (profile.banned) {
-      // Leave for sign-in first, like any sign-out, and say why there
+      // Say why on sign-in
       setPaused(true)
-      navigate('/signin', { replace: true })
-      void signOut(auth)
+      leavePaused(navigate)
       return
     }
     if (profile.pro !== claims.pro) void refreshClaims()

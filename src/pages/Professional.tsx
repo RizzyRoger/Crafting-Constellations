@@ -131,7 +131,9 @@ export const Professional = () => {
     />
   )
 
-  if (profile.pro || claims.pro) {
+  // The profile holds the mark. The token's claim changes after it and can lag for up to an hour,
+  // which kept saying "checked" to someone whose mark was just removed
+  if (profile.pro) {
     return (
       <>
         {head}

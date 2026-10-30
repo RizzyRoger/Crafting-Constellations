@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { makeRoomFor } from '../lib/consentRoom'
 import { focusForNow, pageStart } from '../lib/focusForNow'
 import { setCountVisits, TELEMETRY_AVAILABLE, useCountVisits } from '../lib/telemetry'
 
@@ -21,7 +22,8 @@ export const ConsentNote = () => {
   return (
     <>
       {choice === null && (
-        <aside className="consent" aria-labelledby="consent-title">
+        // Fixed over the foot of every page, so the page leaves room for it while it shows
+        <aside className="consent" aria-labelledby="consent-title" ref={makeRoomFor}>
           <p id="consent-title" className="pencil note">
             May we count visits?
           </p>

@@ -90,16 +90,17 @@ const open = (props: Partial<Props> = {}) => {
     tree()
   }
   // A server render attaches no refs, so the field and Send get stand-in nodes, and the page notes
-  // which of them has focus, starting on `at`
-  const focusOn = (at: 'field' | 'Send') => {
+  // which of them has focus, starting on `at`. The field's form holds all but the page itself
+  const focusOn = (at: 'field' | 'title' | 'Send' | 'page') => {
     const page = { activeElement: null as unknown }
     const node = (name: string) => {
       const self = { name, focus: () => void (page.activeElement = self), setSelectionRange: () => {} }
       return self
     }
-    const nodes = { field: node('field'), Send: node('Send') }
+    const nodes = { field: node('field'), title: node('title'), Send: node('Send'), page: node('page') }
+    const form = { contains: (el: unknown) => el !== nodes.page }
     const attachField = field('textarea').ref as (node: unknown) => void
-    attachField(nodes.field)
+    attachField(Object.assign(nodes.field, { form }))
     const send = field('button').ref as { current: unknown } | undefined
     if (send) send.current = nodes.Send
     page.activeElement = nodes[at]
@@ -121,6 +122,7 @@ const open = (props: Partial<Props> = {}) => {
     sent,
     html: () => renderToStaticMarkup(tree()),
     text: () => field('textarea').value,
+    rows: () => field('textarea').rows,
     title: () => find(tree(), 'input')?.props.value,
     button: () => field('button'),
     type: (value: string) => on('textarea', 'onChange')({ target: { value, selectionStart: value.length } }),
@@ -248,17 +250,70 @@ describe('Composer while a message is on its way', () => {
     expect(composer.text()).toBe('and a second thought')
     expect(composer.title()).toBe('')
   })
+})
 
-  it('clears the title and closes the sheet once the post is in, if nothing more was typed', async () => {
-    const composer = open({ shape: undefined, expandable: true, withTitle: true })
+// The sheet opens only when focus comes into the field. A click or typing in a field that already
+// has focus sends no focus event, so the sheet mustn't fold around someone still in it
+describe('Composer, its sheet once a post is in', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // Focus comes in, as with a click or Tab, and a titled post is written
+  const written = () => {
+    const composer = open({ shape: undefined, expandable: true, withTitle: true, rows: 4 })
     composer.focus()
     composer.typeTitle('A good day')
     composer.type('first post')
+    return composer
+  }
+
+  it('stays open around the field a pressed Send hands focus to, with its title cleared for the next post', async () => {
+    const composer = written()
+    const page = composer.focusOn('Send')
+    composer.post()
+    await composer.answer()
+    expect(page.focused()).toBe('field')
+    expect(composer.text()).toBe('')
+    expect(composer.title()).toBe('')
+    composer.type('second post')
+    expect(composer.title()).toBe('')
+    expect(composer.rows()).toBe(8)
+  })
+
+  it('stays open after Ctrl+Enter, which leaves the caret in the field', async () => {
+    const composer = written()
+    const page = composer.focusOn('field')
+    composer.send()
+    await composer.answer()
+    expect(page.focused()).toBe('field')
+    expect(composer.title()).toBe('')
+    composer.type('second post')
+    expect(composer.title()).toBe('')
+    expect(composer.rows()).toBe(8)
+  })
+
+  it('keeps the title field that Enter sent the post from, so its focus isn\'t dropped', async () => {
+    const composer = written()
+    const page = composer.focusOn('title')
+    // Enter in a text input sends its form
+    composer.post()
+    await composer.answer()
+    expect(page.focused()).toBe('title')
+    expect(composer.title()).toBe('')
+  })
+
+  it('clears the title and folds once the post is in for someone who has left it, and opens again when they come back', async () => {
+    const composer = written()
+    // Focus went elsewhere on the page while it was on its way
+    composer.focusOn('page')
     composer.post()
     await composer.answer()
     expect(composer.title()).toBeUndefined()
+    expect(composer.rows()).toBe(1)
     composer.focus()
     expect(composer.title()).toBe('')
+    expect(composer.rows()).toBe(8)
   })
 })
 

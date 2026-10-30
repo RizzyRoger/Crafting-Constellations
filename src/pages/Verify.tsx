@@ -38,7 +38,7 @@ export const Verify = () => {
 
   if (claims.emailVerified) {
     return (
-      <AuthLayout title="Email confirmed" lede="Private notes and reaching out are open to you now.">
+      <AuthLayout title="Email confirmed" lede="Writing in groups, private notes and reaching out are open to you now.">
         <Link to={next.to} state={next.state} className="act act--wash" style={{ justifySelf: 'start' }}>
           Continue
         </Link>
@@ -49,7 +49,7 @@ export const Verify = () => {
   return (
     <AuthLayout
       title="Confirm your email"
-      lede="We sent a link to your email. Confirming it lets you write privately and reach out to people. Groups are open to you already."
+      lede="We sent a link to your email. Confirming it lets you write in groups and privately, and reach out to people. You can already join groups and read them."
     >
       <div className="stack">
         {USING_EMULATORS && <p className="meta">Local emulator: the link is in the Auth emulator log (terminal running the emulators).</p>}

@@ -125,7 +125,9 @@ export const Composer = ({
       setPicked((m) => picksIn(rest, m))
       setDismissed((at) => (rest && at !== null && at >= cut ? at - cut : null))
       if (titleWent) setTitle('')
-      if (!rest && titleWent) setOpen(false)
+      // Fold the sheet only for someone who has left it: focus coming in is all that opens it, and
+      // after a pressed Send or Ctrl+Enter the caret is still in the field
+      if (!rest && titleWent && !field.current?.form?.contains(document.activeElement)) setOpen(false)
     } catch (e) {
       setError(describeError(e))
     } finally {
