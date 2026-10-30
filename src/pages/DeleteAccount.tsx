@@ -1,10 +1,10 @@
 import { tidyPenName } from '@moderation'
-import { EmailAuthProvider, GoogleAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup, signOut } from 'firebase/auth'
+import { EmailAuthProvider, GoogleAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup } from 'firebase/auth'
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
+import { leaveThenSignOut } from '../auth/useSignOut'
 import { deleteAccount, describeError, problemOf } from '../lib/callables'
-import { auth } from '../lib/firebase'
 import { track } from '../lib/telemetry'
 import { AuthLayout } from './AuthLayout'
 
@@ -44,8 +44,8 @@ export const DeleteAccount = () => {
         : reauthenticateWithPopup(user, new GoogleAuthProvider()))
       await deleteAccount({ confirm })
       track('delete_account', {})
-      navigate('/', { replace: true, state: { left: true } })
-      await signOut(auth)
+      // The front page goes up before signOut, as signing out from anywhere does
+      await leaveThenSignOut(navigate, '/', { state: { left: true } })
     } catch (e) {
       const problem = problemOf(e)
       setError((problem && PROBLEMS[problem]) || describeError(e))

@@ -45,7 +45,9 @@ export const noticeOnAccept = async (pairId: string, before: string | undefined,
     })
 }
 
-export const mirrorFriendship = onDocumentWritten('connections/{pairId}', async (event) => {
+// Retried when a run fails: both steps are safe to repeat, and a dropped run would leave a
+// blocked pair's line on the constellation (and an acceptance unannounced) until the next change
+export const mirrorFriendship = onDocumentWritten({ document: 'connections/{pairId}', retry: true }, async (event) => {
   await mirrorFriendshipOf(event.params.pairId)
   await noticeOnAccept(event.params.pairId, event.data?.before.data()?.status, event.data?.after.data())
 })

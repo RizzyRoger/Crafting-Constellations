@@ -1,4 +1,4 @@
-import { collection, collectionGroup, documentId, endAt, limit, orderBy, query, startAt, where, type Timestamp } from 'firebase/firestore'
+import { collection, collectionGroup, documentId, endAt, limit, onSnapshot, orderBy, query, startAt, where, type Timestamp } from 'firebase/firestore'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
@@ -48,6 +48,43 @@ const Disclosure = ({
   </details>
 )
 
+// One `in` query holds 30 ids, so a longer list is asked for 30 at a time
+const IN_LIMIT = 30
+const NO_ONE: Profile[] = []
+
+// These people's profiles, however many there are. A changed list keeps the last one's until all
+// of its own have come, so someone new writing doesn't blank the names already in the rail
+const useProfiles = (ids: readonly string[]): Profile[] => {
+  const key = ids.join(',')
+  const [profiles, setProfiles] = useState(NO_ONE)
+
+  useEffect(() => {
+    const parts = Array.from({ length: Math.ceil(ids.length / IN_LIMIT) }, (_, at) => ids.slice(at * IN_LIMIT, (at + 1) * IN_LIMIT))
+    if (parts.length === 0) {
+      setProfiles(NO_ONE)
+      return
+    }
+    const answers: (Profile[] | undefined)[] = parts.map(() => undefined)
+    const answer = (at: number, rows: Profile[]) => {
+      answers[at] = rows
+      if (answers.every((part) => part !== undefined)) setProfiles(answers.flatMap((part) => part ?? []))
+    }
+    const stops = parts.map((part, at) =>
+      onSnapshot(
+        query(collection(db, 'users'), where(documentId(), 'in', part)),
+        (snap) => answer(at, snap.docs.map((d) => ({ ...d.data(), id: d.id }) as Profile)),
+        // A refused part names no one rather than holding back the rest
+        () => answer(at, []),
+      ),
+    )
+    return () => stops.forEach((stop) => stop())
+    // ids is what key spells out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+
+  return profiles
+}
+
 const Rail = () => {
   const { user, profile, claims } = useAuth()
   const signOut = useSignOut()
@@ -86,30 +123,26 @@ const Rail = () => {
   const myGroupIds = new Set(memberships.data.map((m) => m.path.split('/')[1]))
   const myGroups = groups.data.filter((g) => myGroupIds.has(g.id)).sort((a, b) => a.name.localeCompare(b.name))
   const myChats = [...chats.data].sort((a, b) => a.name.localeCompare(b.name))
-  // Who's asking to connect, read so anyone banned since drops out of the count (one `in` query holds 30)
+  // Who's asking to connect, read so anyone banned since drops out of the count
   const askerIds = useMemo(() => {
     if (!uid) return []
     const asking = connections.data.filter((c) => c.status === 'pending' && c.recipient === uid).map((c) => c.requester)
-    return [...new Set(asking)].sort().slice(0, 30)
+    return [...new Set(asking)].sort()
   }, [connections.data, uid])
-  const askers = useQueryData<Profile>(uid && askerIds.length ? `rail-askers|${askerIds.join(',')}` : null, () =>
-    query(collection(db, 'users'), where(documentId(), 'in', askerIds)),
-  )
-  const incoming = waitingOn(connections.data, visibleById(askers.data), uid ?? '').length
+  const askers = useProfiles(askerIds)
+  const incoming = waitingOn(connections.data, visibleById(askers), uid ?? '').length
   const unread = notices.data.length + incoming
   const partnerIds = useMemo(() => {
     if (!uid) return []
-    return [...new Set(threads.data.map((thread) => otherInPair(thread.id, uid)).filter(Boolean))].sort().slice(0, 30)
+    return [...new Set(threads.data.map((thread) => otherInPair(thread.id, uid)).filter(Boolean))].sort()
   }, [threads.data, uid])
-  const partners = useQueryData<Profile>(uid && partnerIds.length ? `rail-partners|${partnerIds.join(',')}` : null, () =>
-    query(collection(db, 'users'), where(documentId(), 'in', partnerIds)),
-  )
+  const partners = useProfiles(partnerIds)
   // Tidied as pen names are stored, so a phone's curly apostrophe still finds O'Neil
   const needle = penNameSearchTerm(queryText)
   const search = useQueryData<Profile>(uid && needle ? `rail-search|${needle}` : null, () =>
     query(collection(db, 'users'), orderBy('penNameLower'), startAt(needle), endAt(`${needle}\uf8ff`), limit(8)),
   )
-  const byId = useMemo(() => new Map(partners.data.map((p) => [p.id, p])), [partners.data])
+  const byId = useMemo(() => new Map(partners.map((p) => [p.id, p])), [partners])
   const matches = search.data.filter((p) => !p.banned && p.id !== uid)
 
   const sortedThreads = [...threads.data].sort((a, b) => (b.lastMessageAt?.toMillis() ?? 0) - (a.lastMessageAt?.toMillis() ?? 0))
@@ -210,7 +243,7 @@ const Rail = () => {
         )}
         {!verified && (
           <Link to="/verify" state={{ from: hereOf(location) }} className="disc__empty">
-            Confirm your email to write privately.
+            Confirm your email to write.
           </Link>
         )}
         <nav className="rail__quiet" aria-label="Also">

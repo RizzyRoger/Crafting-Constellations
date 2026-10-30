@@ -12,8 +12,8 @@ import { focusForNow } from '../lib/focusForNow'
 import { useQueryData } from '../lib/live'
 import { openInNewTab } from '../lib/newTab'
 import { penNameSearchTerm } from '../lib/penNameSearch'
+import { queueSaid, type QueueDecision } from '../lib/queueSaid'
 import { readsReports, reportDetails } from '../lib/reportDetails'
-import { outcomeNote } from '../lib/reviewOutcome'
 import { banSaid, focusLost, licenceSaid, type Licence } from '../lib/reviewResult'
 import { roleFocus, type RoleChange } from '../lib/roleQuestion'
 import { ago } from '../lib/time'
@@ -33,6 +33,8 @@ const KIND: Record<QueueItem['kind'], string> = {
 // Refusals that carry a reason (details.problem), said plainly: trying again won't help
 const PROBLEMS: Record<string, string> = {
   admin: 'They’re a moderator. Remove their moderator role first.',
+  // Their own writing, profile or licence application (notTheirOwn in functions/src/admin.ts)
+  self: 'This is about you, so another moderator has to decide it.',
 }
 
 const useAction = () => {
@@ -47,8 +49,9 @@ const useAction = () => {
     } catch (e) {
       const problem = problemOf(e)
       setError((problem && PROBLEMS[problem]) || describeError(e))
-      // The role may have been removed elsewhere while the token here still says it
-      if (refusedAsModerator(e)) refreshClaims().catch(() => undefined)
+      // The role may have been removed elsewhere while the token here still says it. A refusal
+      // that gives its reason got past the role check, so it says nothing about the role
+      if (!problem && refusedAsModerator(e)) refreshClaims().catch(() => undefined)
     } finally {
       setBusy(false)
     }
@@ -56,15 +59,47 @@ const useAction = () => {
   return { busy, error, run }
 }
 
+// Where a decision is said, above its list: the row it was made in (a queue entry, an application,
+// someone licensed) leaves the list once it's made
+type Teller = { say: (words: string) => void; status: RefObject<HTMLElement | null> }
+
+// A decision whose action gives the words that say what it did
+const useDecision = ({ say, status }: Teller) => {
+  const { busy, error, run } = useAction()
+  // A decision is under way or made here, so the row leaving is this moderator's doing
+  const deciding = useRef(false)
+  // Leaving, the row takes the focused button with it, so focus goes to where the result is said
+  useEffect(
+    () => () => {
+      if (deciding.current && focusLost(document) && status.current) focusForNow(status.current)
+    },
+    [status],
+  )
+  // Cleared and marked before the call: the row often leaves before it answers
+  const decide = (action: () => Promise<string>) =>
+    run(async () => {
+      say('')
+      deciding.current = true
+      const words = await action().catch((e) => {
+        deciding.current = false
+        throw e
+      })
+      say(words)
+    })
+  return { busy, error, decide }
+}
+
 // Every report on the writing, read from the reports themselves and not copied to the queue item:
 // deleting an account deletes its reports, so what they wrote goes with it
 const reportsOn = (path: string) => query(collection(db, 'reports'), where('contentPath', '==', path))
 
-const QueueEntry = ({ item, tell }: { item: QueueItem; tell: (outcome?: ModOutcome) => void }) => {
+const QueueEntry = ({ item, teller }: { item: QueueItem; teller: Teller }) => {
   const { uid } = useMe()
-  const { busy, error, run } = useAction()
+  const { busy, error, decide } = useDecision(teller)
   const [note, setNote] = useState('')
-  const decide = (action: () => Promise<{ outcome?: ModOutcome }>) => run(async () => tell((await action()).outcome))
+  const who = `${KIND[item.kind]} · ${item.authorPenName || 'unknown'}`
+  const decideAs = (pressed: QueueDecision, action: () => Promise<{ outcome?: ModOutcome }>) =>
+    decide(async () => queueSaid(who, item.kind, pressed, (await action()).outcome))
   const reads = readsReports(item, uid)
   const filed = useQueryData<FiledReport>(reads ? `admin-reports|${item.contentPath}` : null, () => reportsOn(item.contentPath))
   const wrote = reportDetails(item, filed.data, uid)
@@ -116,15 +151,20 @@ const QueueEntry = ({ item, tell }: { item: QueueItem; tell: (outcome?: ModOutco
       {item.reports && !reads && <p className="meta">This is about you, so what reporters wrote is left for another moderator.</p>}
       {item.kind === 'dm' && item.delivered && <p className="meta">Delivered to the other person with crisis resources shown to both.</p>}
       {item.kind === 'chatMessage' && item.delivered && <p className="meta">Delivered to the chat with crisis resources shown to everyone in it.</p>}
-      <div className="row">
-        <button type="button" className="act act--quiet act--wash" disabled={busy} onClick={decide(() => approveContent({ queueId: item.id }))}>
-          {item.delivered || item.reports ? 'Keep it up' : 'Approve'}
-        </button>
-        <input aria-label="Note to the writer (optional)" placeholder="note to the writer (optional)" value={note} onChange={(e) => setNote(e.target.value)} className="admin-note" />
-        <button type="button" className="act act--quiet" disabled={busy} onClick={decide(() => removeContent({ queueId: item.id, note }))}>
-          {item.kind === 'profile' ? 'Reset profile' : 'Remove'}
-        </button>
-      </div>
+      {/* Their own case: the server refuses them either button */}
+      {item.authorUid === uid ? (
+        <p className="meta">{PROBLEMS.self}</p>
+      ) : (
+        <div className="row">
+          <button type="button" className="act act--quiet act--wash" disabled={busy} onClick={decideAs('approve', () => approveContent({ queueId: item.id }))}>
+            {item.delivered || item.reports ? 'Keep it up' : 'Approve'}
+          </button>
+          <input aria-label="Note to the writer (optional)" placeholder="note to the writer (optional)" value={note} onChange={(e) => setNote(e.target.value)} className="admin-note" />
+          <button type="button" className="act act--quiet" disabled={busy} onClick={decideAs('remove', () => removeContent({ queueId: item.id, note }))}>
+            {item.kind === 'profile' ? 'Reset profile' : 'Remove'}
+          </button>
+        </div>
+      )}
       {error && (
         <p className="error" role="alert">
           {error}
@@ -138,18 +178,16 @@ const Queue = () => {
   const queue = useQueryData<QueueItem>('admin-queue', () =>
     query(collection(db, 'modQueue'), where('state', '==', 'open'), orderBy('priority', 'desc'), orderBy('createdAt', 'asc'), limit(50)),
   )
-  // What came of the last decision, when it wasn't what its button says. Said here, naming the
-  // entry: the entry itself leaves the queue whatever came of it
+  // What came of the last decision, said here naming the entry: the entry itself leaves the queue
+  // whatever came of it
   const [said, setSaid] = useState('')
-  const tell = (item: QueueItem) => (outcome?: ModOutcome) => {
-    const note = outcomeNote(outcome, item.kind)
-    setSaid(note ? `${KIND[item.kind]} · ${item.authorPenName || 'unknown'} — ${note}` : '')
-  }
+  const status = useRef<HTMLParagraphElement>(null)
+  const teller: Teller = { say: setSaid, status }
   if (queue.error) return <p className="error" role="alert">{describeError(queue.error)}</p>
   return (
     <div className="stack">
       {/* Mounted from the start, so screen readers announce the note when it lands */}
-      <p className="meta live" role="status">
+      <p ref={status} className="meta live" role="status">
         {said}
       </p>
       {!queue.loading && queue.data.length === 0 ? (
@@ -157,7 +195,7 @@ const Queue = () => {
       ) : (
         <ul className="ruled-list">
           {queue.data.map((item) => (
-            <QueueEntry key={item.id} item={item} tell={tell(item)} />
+            <QueueEntry key={item.id} item={item} teller={teller} />
           ))}
         </ul>
       )}
@@ -201,36 +239,21 @@ const useDocuments = (uid: string) => {
   return { busy, error, tried, held, open }
 }
 
-// Where a licence decision is said, above both lists: the row it was made in leaves its list
-type Teller = { say: (words: string) => void; status: RefObject<HTMLElement | null> }
-
-const useDecision = (uid: string, who: string, { say, status }: Teller) => {
-  const { busy, error, run } = useAction()
-  // A decision is under way or made here, so the row leaving is this moderator's doing
-  const deciding = useRef(false)
-  // Leaving, the row takes the focused button with it, so focus goes to where the result is said
-  useEffect(
-    () => () => {
-      if (deciding.current && focusLost(document) && status.current) focusForNow(status.current)
-    },
-    [status],
-  )
-  const decide = (request: { decision: Licence; note?: string }) =>
-    run(async () => {
-      say('')
-      deciding.current = true
+// A licence decision, said above both lists: the application's, or the licensed one's
+const useLicence = (uid: string, who: string, teller: Teller) => {
+  const { busy, error, decide } = useDecision(teller)
+  const licence = (request: { decision: Licence; note?: string }) =>
+    decide(async () => {
       // An older backend leaves outcome out
-      const done: { ok: true; outcome?: ModOutcome } = await reviewProfessional({ uid, ...request }).catch((e) => {
-        deciding.current = false
-        throw e
-      })
-      say(licenceSaid(who, request.decision, done.outcome))
+      const done: { ok: true; outcome?: ModOutcome } = await reviewProfessional({ uid, ...request })
+      return licenceSaid(who, request.decision, done.outcome)
     })
-  return { busy, error, decide }
+  return { busy, error, decide: licence }
 }
 
 const Application = ({ app, person, teller }: { app: ProApplication & { id: string }; person?: Profile; teller: Teller }) => {
-  const { busy, error, decide } = useDecision(app.uid, person?.penName ?? app.uid, teller)
+  const { uid: me } = useMe()
+  const { busy, error, decide } = useLicence(app.uid, person?.penName ?? app.uid, teller)
   const docs = useDocuments(app.uid)
   const [note, setNote] = useState('')
   return (
@@ -273,15 +296,20 @@ const Application = ({ app, person, teller }: { app: ProApplication & { id: stri
           Couldn’t open {docs.tried}. {docs.error}
         </p>
       )}
-      <div className="row">
-        <button type="button" className="act act--quiet act--wash" disabled={busy} onClick={decide({ decision: 'approve', note })}>
-          Approve licence
-        </button>
-        <input aria-label="Note to the applicant (optional)" placeholder="note (optional)" value={note} onChange={(e) => setNote(e.target.value)} className="admin-note" />
-        <button type="button" className="act act--quiet" disabled={busy} onClick={decide({ decision: 'deny', note })}>
-          Deny
-        </button>
-      </div>
+      {/* Their own application: the server refuses them either button */}
+      {app.uid === me ? (
+        <p className="meta">{PROBLEMS.self}</p>
+      ) : (
+        <div className="row">
+          <button type="button" className="act act--quiet act--wash" disabled={busy} onClick={decide({ decision: 'approve', note })}>
+            Approve licence
+          </button>
+          <input aria-label="Note to the applicant (optional)" placeholder="note (optional)" value={note} onChange={(e) => setNote(e.target.value)} className="admin-note" />
+          <button type="button" className="act act--quiet" disabled={busy} onClick={decide({ decision: 'deny', note })}>
+            Deny
+          </button>
+        </div>
+      )}
       {error && (
         <p className="error" role="alert">
           {error}
@@ -291,8 +319,9 @@ const Application = ({ app, person, teller }: { app: ProApplication & { id: stri
   )
 }
 
+// Their own mark too: the server lets a moderator take it away
 const LicensedPro = ({ pro, teller }: { pro: Profile; teller: Teller }) => {
-  const { busy, error, decide } = useDecision(pro.id, pro.penName, teller)
+  const { busy, error, decide } = useLicence(pro.id, pro.penName, teller)
   return (
     <li className="stack" style={{ gap: 8 }}>
       <div className="row" style={{ justifyContent: 'space-between' }}>

@@ -8,11 +8,29 @@ import { Professional } from './Professional'
 
 // No DOM here, so the test calls the page itself and keeps its state and refs between calls:
 // it can type, press Send and look at what the page shows next. Markup is a server render of that
-const page = vi.hoisted(() => ({ hooks: [] as unknown[], at: 0, calling: false, application: null as unknown, stored: [] as string[] }))
+const page = vi.hoisted(() => ({
+  hooks: [] as unknown[],
+  at: 0,
+  calling: false,
+  application: null as unknown,
+  stored: [] as string[],
+  // What the profile says, and what the token, which can lag it, says
+  pro: false,
+  claimPro: false,
+  local: false,
+}))
 
-vi.mock('../lib/firebase', () => ({ db: {}, storage: {}, LOCAL_BACKEND: false }))
+vi.mock('../lib/firebase', () => ({
+  db: {},
+  storage: {},
+  get LOCAL_BACKEND() {
+    return page.local
+  },
+}))
 vi.mock('../lib/callables', () => ({ describeError: (e: unknown) => String(e) }))
-vi.mock('../auth/AuthProvider', () => ({ useMe: () => ({ uid: 'alice', claims: { emailVerified: true }, profile: { pro: false } }) }))
+vi.mock('../auth/AuthProvider', () => ({
+  useMe: () => ({ uid: 'alice', claims: { emailVerified: true, pro: page.claimPro }, profile: { pro: page.pro } }),
+}))
 vi.mock('../lib/live', () => ({ useDocData: () => ({ data: page.application, loading: false, error: null, pending: false }) }))
 vi.mock('../components/PageHead', () => ({ PageHead: () => null }))
 vi.mock('firebase/firestore', async (importOriginal) => ({
@@ -51,10 +69,13 @@ vi.mock('react', async (importOriginal) => {
 type Props = Record<string, unknown> & { children?: ReactNode }
 type Handler = (event: unknown) => unknown
 
-const open = (application: unknown, stored: string[] = []) => {
+const open = (application: unknown, stored: string[] = [], me: { pro?: boolean; claimPro?: boolean; local?: boolean } = {}) => {
   page.hooks = []
   page.application = application
   page.stored = stored
+  page.pro = me.pro ?? false
+  page.claimPro = me.claimPro ?? false
+  page.local = me.local ?? false
   vi.mocked(uploadBytes).mockClear()
   vi.mocked(setDoc).mockClear()
 }
@@ -163,5 +184,29 @@ describe('the licence application', () => {
     expect(refusal()).toBeUndefined()
     expect(uploaded()).toEqual([`proDocs/alice/${R}/doc-1`])
     expect(sentFiles()).toEqual([`${R}/doc-1`])
+  })
+
+  // Revoking changes the profile first and the token's claim after; a token fetched in between
+  // still says pro, for up to an hour
+  it('says the mark was removed once the profile has lost it, whatever the token still says', () => {
+    open({ status: 'revoked', files: ['doc-1'], reviewedAt, reviewNote: 'Licence lapsed.' }, [], { claimPro: true })
+    const html = markup()
+    expect(html).not.toMatch(/Your licence is checked/)
+    expect(html).toMatch(/A moderator removed your licensed mark\. Note: Licence lapsed\. You can apply again\./)
+    expect(html).toMatch(/<form class="form"/)
+  })
+
+  it('says applications are paused on the local backend once the mark is removed, whatever the token says', () => {
+    open({ status: 'revoked', files: ['doc-1'], reviewedAt }, [], { claimPro: true, local: true })
+    const html = markup()
+    expect(html).not.toMatch(/Your licence is checked/)
+    expect(html).toMatch(/Applications are paused/)
+  })
+
+  it('says the licence is checked as soon as the profile has the mark', () => {
+    for (const local of [false, true]) {
+      open({ status: 'approved', files: ['doc-1'], reviewedAt }, [], { pro: true, local })
+      expect(markup()).toMatch(/Your licence is checked\./)
+    }
   })
 })

@@ -147,6 +147,22 @@ describe('Verify says what happened', () => {
   })
 })
 
+// Every kind of group writing waits for a confirmed email (firestore.rules' verified()), as private
+// notes and reaching out do; only joining and reading don't
+describe('Verify says what confirming opens', () => {
+  const lede = () => (react.draw(react.page(), Verify) as Drawn).props.lede
+
+  it('says group writing waits for it too, not that groups are open already', () => {
+    expect(lede()).toContain('write in groups')
+    expect(lede()).not.toMatch(/groups are open/i)
+  })
+
+  it('says group writing is open once it’s confirmed', () => {
+    auth.current.claims = { emailVerified: true }
+    expect(lede()).toContain('Writing in groups')
+  })
+})
+
 describe('confirming an email goes back to the page that asked for it', () => {
   const from = '/groups/abc?tab=posts'
 

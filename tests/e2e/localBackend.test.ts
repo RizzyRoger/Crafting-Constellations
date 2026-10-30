@@ -827,6 +827,29 @@ describe('review queue', () => {
 
     expect(await field(path, 'status')).toBe('removed')
     expect((await adminDb.doc(`modQueue/${queueId(path)}`).get()).data()).toMatchObject({ state: 'resolved', resolution: 'removed', resolvedBy: first })
+    // Its writer can still read it, so it says a moderator took it down and never which one
+    expect(await field(path, 'removedBy')).toBe('moderator')
+  })
+
+  it('hides a banned writer’s writing without naming the moderator on it', async () => {
+    const writer = await person('Ragwort')
+    const reader = await person('Speedwell')
+    const pairId = [writer, reader].sort().join('_')
+    await adminDb.doc(`connections/${pairId}`).set({ uids: pairId.split('_'), requester: writer, recipient: reader, status: 'accepted', createdAt: new Date(), updatedAt: new Date() })
+    const g = await group([writer, reader])
+    const post = `${g}/posts/p1`
+    await adminDb.doc(post).set({ authorUid: writer, body: 'A long day.', status: 'published', createdAt: new Date() })
+    const talk = [`${post}/comments/c1`, `${g}/messages/m1`, `dms/${pairId}/messages/m1`]
+    await Promise.all(talk.map((path) => adminDb.doc(path).set({ authorUid: writer, text: 'Long night here.', status: 'published', createdAt: new Date() })))
+    const writing = [post, ...talk]
+
+    const mod = await moderator()
+    expect(await callViaQueue('banUser', { uid: writer, reason: 'Harassment.', hideContent: true })).toMatchObject({ state: 'done' })
+    // Once unbanned they can read all of it again; who banned them stays with the ban
+    for (const path of writing) {
+      expect((await adminDb.doc(path).get()).data(), path).toMatchObject({ status: 'removed', removedBy: 'moderator' })
+    }
+    expect(await field(`bans/${writer}`, 'bannedBy')).toBe(mod)
   })
 
   it('leaves held writing its writer withdrew as theirs, and tells them nothing', async () => {

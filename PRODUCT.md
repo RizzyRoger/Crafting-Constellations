@@ -18,7 +18,7 @@ Assumption: the typical user is a family member or caregiver under emotional and
 
 The spec PDF ("Crafting Constellations", partly outdated — its compute/AI template sections are ignored) defines the first build:
 
-- Pen-name accounts (email/password or Google); a verified email unlocks private messages and reaching out.
+- Pen-name accounts (email/password or Google); a verified email unlocks writing in groups, private messages and reaching out.
 - Constellation page: groups as clusters, people as stars, friendships as lines; a list view says the same in text.
 - Groups with talk, posts, comments and likes; private one-to-one notes between connected people.
 - Licensed mental health professionals apply with documents; moderators approve; a circled "licensed" mark appears.

@@ -144,18 +144,23 @@ export const startLocalBackend = async () => {
   const runner = randomUUID()
 
   const answer = async (ref: DocumentReference) => {
-    // Claim it first, so a replayed snapshot or a second backend never runs it twice
-    const claimed = await db.runTransaction(async (tx) => {
+    // Claim it first, so a replayed snapshot or a second backend never runs it twice. The claim
+    // can go through and still report an error (a dropped connection), and the transaction then
+    // tries again: finding the call taken by this same claim, it runs it all the same.
+    const claim = randomUUID()
+    // As aged when it was claimed: a second try keeps the first one's decision
+    let age = 0
+    const call = await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref)
       const data = snap.data()
+      if (data?.state === 'running' && data.claim === claim) return data
       if (!data || data.state !== 'new') return null
       // Aged on the server's clock, which also stamped createdAt: this machine's may be off
-      const age = snap.readTime.toMillis() - (data.createdAt?.toMillis?.() ?? 0)
-      tx.update(ref, age > CALL_TTL_MS ? { state: 'expired' } : { state: 'running', runner })
-      return { call: data, age }
+      age = snap.readTime.toMillis() - (data.createdAt?.toMillis?.() ?? 0)
+      tx.update(ref, age > CALL_TTL_MS ? { state: 'expired' } : { state: 'running', runner, claim })
+      return data
     })
-    if (!claimed) return
-    const { call, age } = claimed
+    if (!call) return
     if (age > CALL_TTL_MS) {
       log(`${call.name} expired after ${age}ms`)
       return
@@ -217,13 +222,14 @@ export const startLocalBackend = async () => {
     )
   })
 
-  // The first snapshot is the baseline: recount everything once, then follow changes
+  // The first snapshot is the baseline: recount everything once, then follow changes. The read
+  // is retried, like everything else here: a failed one would end the process unhandled.
   const parentsOnChange = (recount: (path: string) => void, everything: () => Promise<string[]>) => {
     let primed = false
     return (snap: QuerySnapshot) => {
       if (!primed) {
         primed = true
-        void everything().then((paths) => paths.forEach(recount))
+        void retrying('recounting everything', async () => (await everything()).forEach(recount))
         return
       }
       snap.docChanges().forEach((change) => {
@@ -262,12 +268,10 @@ export const startLocalBackend = async () => {
     // Connections removed while we were off left their friendship behind. Each is checked
     // against its connection as it is now: one accepted since this snapshot keeps its line.
     const accepted = new Set(snap.docs.filter((d) => d.data().status === 'accepted').map((d) => d.id))
-    void db
-      .collection('friendships')
-      .get()
-      .then((friendships) =>
-        friendships.docs.filter((d) => !accepted.has(d.id)).forEach((d) => void retrying(`friendship ${d.id}`, () => mirrorFriendshipOf(d.id))),
-      )
+    void retrying('friendships left behind', async () => {
+      const friendships = await db.collection('friendships').get()
+      friendships.docs.filter((d) => !accepted.has(d.id)).forEach((d) => void retrying(`friendship ${d.id}`, () => mirrorFriendshipOf(d.id)))
+    })
   }
 
   const added = (handle: (ref: DocumentReference, data: DocumentData) => Promise<unknown>, what: string) => (snap: QuerySnapshot) =>
@@ -310,8 +314,10 @@ export const startLocalBackend = async () => {
     watch('comments', db.collectionGroup('comments'), parentsOnChange(recountPosts, allPosts)),
   ]
 
-  const cleanup = setInterval(() => void removeStaleCalls().catch((error: unknown) => log('cleanup failed:', error)), CALL_CLEANUP_EVERY_MS)
-  void removeStaleCalls()
+  // Housekeeping: a failure waits for the next round, and never ends the process
+  const cleanUpCalls = () => void removeStaleCalls().catch((error: unknown) => log('cleanup failed:', error))
+  const cleanup = setInterval(cleanUpCalls, CALL_CLEANUP_EVERY_MS)
+  cleanUpCalls()
   log(`running for ${projectId}`)
 
   // Stops listening, then lets the calls under way finish (a restart shouldn't leave an account

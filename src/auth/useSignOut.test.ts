@@ -1,5 +1,6 @@
+import type { NavigateFunction } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
-import { useSignOut } from './useSignOut'
+import { leaveThenSignOut, useSignOut } from './useSignOut'
 
 // The router renders a navigation as a transition, which waits behind an update already queued
 // (a snapshot for the open page). If Auth's change lands meanwhile, Gate is still on the page and
@@ -15,7 +16,17 @@ vi.mock('../lib/firebase', () => ({ auth: {} }))
 
 describe('useSignOut', () => {
   it('puts the front page up at once, before signing out', async () => {
+    seen.length = 0
     await useSignOut()()
     expect(seen).toEqual([['navigate', '/', { replace: true, flushSync: true }], ['signOut']])
+  })
+})
+
+describe('leaveThenSignOut', () => {
+  it('passes along what the page leaves with, still at once and before signing out', async () => {
+    seen.length = 0
+    const navigate = ((...args: unknown[]) => void seen.push(['navigate', ...args])) as NavigateFunction
+    await leaveThenSignOut(navigate, '/', { state: { left: true }, flushSync: false })
+    expect(seen).toEqual([['navigate', '/', { state: { left: true }, replace: true, flushSync: true }], ['signOut']])
   })
 })

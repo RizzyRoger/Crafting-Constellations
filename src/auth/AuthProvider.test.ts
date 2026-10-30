@@ -1,8 +1,15 @@
 import type { User } from 'firebase/auth'
+import type { NavigateFunction } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
-import { currentClaims } from './AuthProvider'
+import { currentClaims, leavePaused } from './AuthProvider'
+
+const seen = vi.hoisted(() => [] as unknown[][])
 
 vi.mock('../lib/firebase', () => ({ auth: {}, db: {} }))
+vi.mock('firebase/auth', async (actual) => ({
+  ...(await actual<typeof import('firebase/auth')>()),
+  signOut: async () => void seen.push(['signOut']),
+}))
 
 // A signed-in person as the SDK sees them on a fresh page load: it has reloaded them (so
 // emailVerified is current) but still holds the token it saved, until asked for a fresh one.
@@ -67,5 +74,20 @@ describe('currentClaims', () => {
     expect((await currentClaims(user)).emailVerified).toBe(false)
     expect((await currentClaims(user)).emailVerified).toBe(false)
     expect(asked).toEqual([false, true, false, false])
+  })
+})
+
+// A pause seen on the profile signs them out like any sign-out (see useSignOut.test): sign-in goes
+// up at once, before signOut starts, or Gate can send whoever signs in next to this person's page.
+// The effect that sees it runs while React is committing, where flushSync can't put a page up, so
+// this waits for it to end
+describe('leavePaused', () => {
+  it('puts sign-in up at once, before signing out, once the effect that saw the pause has ended', async () => {
+    seen.length = 0
+    const navigate = ((...args: unknown[]) => void seen.push(['navigate', ...args])) as NavigateFunction
+    leavePaused(navigate)
+    expect(seen).toEqual([])
+    await new Promise((done) => setTimeout(done))
+    expect(seen).toEqual([['navigate', '/signin', { replace: true, flushSync: true }], ['signOut']])
   })
 })

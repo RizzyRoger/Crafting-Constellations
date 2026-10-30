@@ -70,6 +70,41 @@ Baseline: typecheck, functions build, unit 133, rules 48, deleteAccount e2e 5, l
 - Decided: T10 (stop treating plain fear of dying as crisis language) is dropped. Five reviews in a row found real crisis lines its exemptions let through. Holding an ordinary line, with resources shown, is the safer failure, so those lines are held as before.
 - The project folder moved to `~/Desktop/code/Hyphen_hacks` mid-round; the worktree was repaired in place (`git worktree repair`) with nothing lost.
 
+### Round 4 (the last: stopped here by request, on main after PR #9)
+
+- Finders over every area plus round 3's diff: 41 raw → 32 unique → 26 confirmed, 6 refuted. Four of them needed a second verification pass after an interruption.
+- Two are high, both crisis lines that went out with no resources:
+  - a text-style emoji didn't end a clause;
+  - a texting shorthand with its digit glued on read as a distance.
+- The rest:
+  - incomplete fixes from earlier rounds: lookalike-letter pen names (role words, and exact copies of another member's name), sign-out after deletion, focus and announcements on Join/Leave, Review and the Friends welcome;
+  - moderators' uids on documents the people they acted on can read;
+  - layout on phones: the send bar, the consent slip, iPhone zoom on small inputs, a long word in the person sheet.
+- Refuted, and left as they are:
+  - a reported moderator can still read who reported them, through the rules;
+  - a report filed just before a decision is dropped;
+  - a held comment's pings are lost while its post is hidden;
+  - modifier letters count as letters in a pen name;
+  - the 'accepted' notice after a block;
+  - check-ins count for the day the server got them.
+- Fixed in 13 groups, all approved after adversarial review. Then the lead made these follow-ups, each with a test that fails without it, then reviewed independently:
+  - U28: disabled link buttons now dim;
+  - U30: the Verify copy says group writing needs a confirmed email too;
+  - U1's server half: a revoke pressed again now finishes the claim and past-writing clean-up an earlier failure left undone;
+  - U21's deletion half: DeleteAccount leaves the page before signing out;
+  - Group: what Join or Leave came to is said only in the group open when its answer lands, whatever order the answers come in;
+  - two lookalike letters in the role-word check;
+  - the crisis treatment exemption tightened to the reviewer's word list, so it only ever adds holds;
+  - the two new e2e files are now in `test:local-backend`;
+  - README notes on moderators' own cases and the one-off `clear-moderator-ids` script.
+- Checks: unit 1681 → 1902; rules 79; functions e2e 38 → 41; local-backend e2e 56 → 67; `tsc -b`, functions build, `vite build` clean, with no regex lookbehinds in the site.
+- Left as they are, open for a later round:
+  - a pen name in lookalike letters can still be copied in Latin. The reverse direction needs a shape index and a backfill, which "keys stay stable" ruled out.
+  - the private-thread send bar at 375×667 is mostly clear of the consent slip, but its lower edge sits under it. The landscape case is unchanged (U26 partial). There isn't room for everything at that size.
+  - the local backend: a claim commit that lands followed by every retry failing still leaves the site waiting 5 minutes (as before).
+  - Chat's "Leave chat" drops focus, and a refusal there isn't tied to the chat (the Group fix's sibling).
+- For the PR: after deploying, run `npm run clear-moderator-ids -- --prod --project <id> --dry-run` once, then again without `--dry-run`. It takes moderators' uids off older documents. Deploy order as before: rules, then site, then backend.
+
 ## Notifications, @mentions, seamless paper, draggable chart (2026-10-10)
 
 Plan: `/Users/darren/.claude/plans/i-want-you-to-quiet-stardust.md`

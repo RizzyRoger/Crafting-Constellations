@@ -26,7 +26,7 @@ export const ProfileForm = ({ uid, current, submitLabel, onSaved, onHold }: Prof
   const [pigment, setPigment] = useState<Pigment>((current?.pigment as Pigment) ?? 'paynesBlue')
   const [note, setNote] = useState(current?.note ?? '')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<ProfileError | null>(null)
+  const [error, setError] = useState<(ProfileError & { crisis: boolean }) | null>(null)
   const [crisis, setCrisis] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -43,8 +43,9 @@ export const ProfileForm = ({ uid, current, submitLabel, onSaved, onHold }: Prof
 
   const check = checkPenName(penName)
   const hint = check.ok ? null : PEN_NAME_HINTS[check.problem]
-  // A name that holds crisis language is refused like any other, but the resources come with it
-  const nameCrisis = !check.ok && check.problem === 'crisis'
+  // A name that holds crisis language is refused like any other, but the resources come with it,
+  // here or when the server refuses it: the server's moderation can be newer than the site's
+  const nameCrisis = (!check.ok && check.problem === 'crisis') || error?.crisis === true
   const noteError = error?.at === 'note' ? error.text : null
   const formError = error?.at === 'form' ? error.text : null
 
@@ -62,7 +63,8 @@ export const ProfileForm = ({ uid, current, submitLabel, onSaved, onHold }: Prof
       if (!result.crisis) onSaved?.()
     } catch (e) {
       onHold?.(crisis)
-      setError(profileErrorOf(e instanceof Error ? e.message : '', problemOf(e), describeError(e)))
+      const problem = problemOf(e)
+      setError({ ...profileErrorOf(e instanceof Error ? e.message : '', problem, describeError(e)), crisis: problem === 'crisis' })
     } finally {
       setBusy(false)
     }

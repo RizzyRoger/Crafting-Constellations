@@ -429,6 +429,13 @@ p {
   text-decoration-thickness: 2px;
 }
 
+/* Waiting on what's being done, as a dimmed .act beside it is: a live look that does nothing reads
+   as broken */
+.link-btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .status-note {
   font-family: var(--font-pencil);
   font-size: 15px;
@@ -803,9 +810,19 @@ p {
 
 /* ---------- people sheet (constellation) ---------- */
 
+/* One column no wider than the sheet, so nothing in it can widen the page's column and the chart with it */
 .person {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+}
+
+/* Someone's note can be one long word (hashtags run together), as can a group's name. It set the
+   sheet's column, and the chart's with it: the page scrolled sideways at 375px, and wider it ran out
+   of the floating sheet. anywhere, not break-word: only anywhere lets the column shrink below the word */
+.person > .note,
+.person > .code {
+  overflow-wrap: anywhere;
 }
 
 .person > .link-btn,
@@ -850,8 +867,9 @@ p {
     overflow: hidden;
   }
 
+  /* Room at the foot for the consent slip while it shows: in one column it sits over the send bar */
   .shell__main {
-    padding: 16px 16px 16px;
+    padding: 16px 16px calc(16px + var(--consent-room, 0px));
   }
 
   /* Capped, so the rail scrolls as a whole and the lists keep their height. With the foot pinned they
@@ -1210,10 +1228,11 @@ p {
 
 /* ---------- auth (board 04) ---------- */
 
+/* Room at the foot for the consent slip while it shows, so Sign in can scroll clear of it */
 .auth {
   display: grid;
   justify-items: center;
-  padding: 12px 16px 48px;
+  padding: 12px 16px calc(48px + var(--consent-room, 0px));
 }
 
 .auth__wash {
@@ -1238,9 +1257,11 @@ p {
 
 /* ---------- constellation chart ---------- */
 
+/* One column as wide as the page, so a long word under the chart can't lay the chart out wider */
 .constellation {
   position: relative;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
 }
 
@@ -1516,6 +1537,16 @@ p {
   border-bottom: 1px solid var(--ink);
   border-radius: 0;
   padding: 6px 0;
+}
+
+/* iPhone Safari zooms the page into a field under 16px as it takes focus, and stays zoomed, with
+   the right edge off-screen. Where a finger focuses them, these smaller fields come up to 16px; a
+   mouse keeps the quieter size */
+@media (pointer: coarse) {
+  .disc__search,
+  .admin-note {
+    font-size: 16px;
+  }
 }
 
 .disc__list {
@@ -1825,6 +1856,14 @@ a.disc__empty:hover {
   min-width: 0;
 }
 
+/* A line each under the field. The field's basis is 0, so a 'may wait' note or a refusal short
+   enough to fit beside Send shared its line and squeezed it to a sliver, kept words and all. An
+   empty note stays out of the row (.live:empty) */
+.composer--bar > .hint,
+.composer--bar > .error {
+  flex: 1 0 100%;
+}
+
 .composer--bar textarea,
 .composer--bar input[type='text'] {
   border: 0;
@@ -1989,6 +2028,20 @@ a.disc__empty:hover {
     bottom: 16px;
     width: auto;
   }
+}
+
+/* While the slip shows, ConsentNote keeps what it covers at the foot of the screen in --consent-room.
+   With no room left for it, Sign in, Google and a phone's send bar sat under it with no way to scroll
+   them clear. The pages that scroll the window (here and .auth) and the one-column shell (.shell__main
+   on phones) leave that much room at their foot, and focus scrolls clear of it. The two-column shell
+   keeps its layout: there the slip sits over the rail's foot and the start of a send bar, not all of it */
+.landing {
+  padding-bottom: var(--consent-room, 0px);
+}
+
+html,
+.shell__main {
+  scroll-padding-bottom: var(--consent-room, 0px);
 }
 
 /* ---------- @mentions ---------- */
