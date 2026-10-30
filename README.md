@@ -66,7 +66,7 @@ npm run test:local-backend
 - `npm test` covers the moderation rules, the constellation layout, the account-deletion rules, and helpers.
 - `npm run test:rules` runs the Firestore and Storage security rules against the emulators.
 - `npm run test:e2e` runs account deletion (function, triggers, Storage), a moderator's profile reset, a moderator's licence review, removing a moderator (in the app and with `grant-admin`), and chat and group names end to end against the emulators.
-- `npm run test:local-backend` runs the local backend (below) against the emulators, with no Functions emulator, including how it copes when stopped mid-call, when Auth fails, or with no Storage; plus a rename racing a moderator's profile reset, reporting rounds after a moderator's decision, and reports naming a path Firestore can't read.
+- `npm run test:local-backend` runs the local backend (below) against the emulators, with no Functions emulator, including how it copes when stopped mid-call, when Auth fails, or with no Storage; plus a rename racing a moderator's profile reset, reporting rounds after a moderator's decision, reports naming a path Firestore can't read, pen names copied in lookalike letters, and the one-off `clear-moderator-ids` cleanup.
 
 Stop `npm run emulators` before the last three; they use the same ports.
 
@@ -293,12 +293,14 @@ Ban records and the audit log stay; the audit row holds ids and counts only. A p
 
 - **The first one** claims the role on **Review** with a confirmed email listed in `ADMIN_EMAILS` (step 7 under "After upgrading to Blaze").
 - **Adding one:** **Review → People → Make moderator**. They open Review at `/admin`, which fetches their new role; from then on it's in their sidebar.
+- **Their own cases:** a moderator's own writing, profile and licence application wait in Review for another moderator; Review shows no decision on them. They can still revoke their own licensed mark.
 - **Removing one:** **Review → People → Remove moderator**. Nobody can remove their own role. Moderators can't be banned until their role is removed.
   - Their moderator actions (approve, remove, ban, licences, roles, groups) stop at once: the functions check the role in Auth on every call, not only in the person's token.
   - Their sessions end, as a ban's do, so each device signs in again without the role. A page of theirs that's open signs out when they next come back to it.
   - **What still lags:** the Firestore and Storage rules read the role from the ID token, and a token already given out can't be taken back. One they hold can still read the review queue, reports, bans, the audit log, licence applications and documents, and every group's writing until it expires, up to an hour after it was made. Making it immediate would mean the rules looking up a moderator record on every read.
   - Someone whose email is still in `ADMIN_EMAILS` can claim the role again: take them off the list too.
   - `npm run grant-admin -- --uid <uid> --remove` does the same from a terminal, ending their sessions too.
+- **Older data:** writing a moderator took down used to name them in `removedBy`, and a licence decision in `reviewedBy`. `npm run clear-moderator-ids -- --dry-run` counts what still does against the emulators; with `GOOGLE_APPLICATION_CREDENTIALS` set, `-- --prod --project <id>` clears it. Who decided stays in the review queue, bans and the audit log.
 
 ## How it fits together
 
