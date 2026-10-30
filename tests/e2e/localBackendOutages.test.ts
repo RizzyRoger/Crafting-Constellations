@@ -1,7 +1,8 @@
 /*
  * The local backend (functions/src/local-backend.ts) when something around it goes away: it is
- * stopped partway through a call (a restart, a reboot), Auth fails to answer, or there's no
- * Storage (as on the NUC). On the Auth and Firestore emulators, with the backend in this process.
+ * stopped partway through a call (a restart, a reboot), Auth fails to answer, Firestore loses its
+ * answer to a commit, or there's no Storage (as on the NUC). On the Auth and Firestore emulators,
+ * with the backend in this process.
  * Run with `npm run test:local-backend`.
  *
  * Calls are written straight to calls/{id} (the rules are localBackend.test.ts's business), for
@@ -24,6 +25,7 @@ let backend: Backend
 // The backend's own modules, loaded once it has set up its environment
 let callables: Record<string, { run: (request: unknown) => Promise<unknown> }>
 let backendAuth: { getUser: (uid: string) => Promise<unknown> }
+let backendDb: { runTransaction: (work: (tx: unknown) => Promise<unknown>, options?: unknown) => Promise<unknown> }
 let backendStorage: { app: { options: { storageBucket?: string } } }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -77,6 +79,7 @@ beforeAll(async () => {
   // @ts-expect-error built JS from the functions package (npm run functions:build)
   const app = await import('../../functions/lib/app.js')
   backendAuth = app.auth
+  backendDb = app.db
   backendStorage = app.storage
 })
 
@@ -137,6 +140,23 @@ describe('Auth', () => {
   it('still asks someone Auth has no account for to sign in', async () => {
     const ref = await call(`outage-${run}-nobody`, 'saveProfile', { note: 'Back soon.' })
     expect(await answered(ref)).toMatchObject({ state: 'failed', error: { status: 'unauthenticated' } })
+  })
+})
+
+describe('Firestore', () => {
+  it('answers a call whose claim went through though Firestore reported an error, so the site isn’t left waiting', async () => {
+    const uid = await person()
+    const saved = vi.spyOn(callables.saveProfile, 'run').mockResolvedValue({ ok: true })
+    // Every commit goes through and then reports an error (a dropped connection), so the
+    // transaction runs again, as the SDK's does
+    const runTransaction = backendDb.runTransaction.bind(backendDb)
+    vi.spyOn(backendDb, 'runTransaction').mockImplementation(async (work, options) => {
+      await runTransaction(work, options)
+      return runTransaction(work, options)
+    })
+    const ref = await call(uid, 'saveProfile', { note: 'Back soon.' })
+    expect(await answered(ref)).toMatchObject({ state: 'done', result: { ok: true } })
+    expect(saved).toHaveBeenCalledTimes(1)
   })
 })
 

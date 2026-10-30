@@ -157,6 +157,31 @@ describe('reviewProfessional', () => {
     await expect(reviewProfessional({ uid: gone, decision: 'revoke' })).resolves.toMatchObject({ data: { ok: true } })
     expect(await field(`users/${gone}`, 'pro')).toBe(false)
   })
+
+  // The applicant reads their application, and a uid is enough to find the person behind it
+  it('never names the moderator on the application its applicant reads, and keeps who decided for moderators', async () => {
+    const n = await asModerator()
+    const mod = `review-mod-${n}`
+    const denied = `denied-applicant-${n}`
+    const revoked = `revoked-applicant-${n}`
+    await person(denied)
+    await applied(denied)
+    // Approved back when a decision named the moderator on it
+    await person(revoked, { claims: { pro: true }, profile: { pro: true } })
+    await db.doc(`proApplications/${revoked}`).set({ uid: revoked, status: 'approved', legalName: 'Test Person', files: ['doc-1'], reviewedAt: new Date(), reviewedBy: `earlier-mod-${n}` })
+
+    await expect(reviewProfessional({ uid: denied, decision: 'deny', note: 'The scan is too blurry to read.' })).resolves.toMatchObject({ data: { ok: true } })
+    await expect(reviewProfessional({ uid: revoked, decision: 'revoke' })).resolves.toMatchObject({ data: { ok: true } })
+
+    for (const uid of [denied, revoked]) {
+      const application = (await db.doc(`proApplications/${uid}`).get()).data()
+      expect(application, uid).toMatchObject({ reviewedAt: expect.anything() })
+      expect(application, uid).not.toHaveProperty('reviewedBy')
+      const logged = await db.collection('adminActions').where('target', '==', uid).get()
+      expect(logged.docs.map((d) => d.get('actorUid')), uid).toEqual([mod])
+    }
+    expect(await field(`proApplications/${denied}`, 'reviewNote')).toBe('The scan is too blurry to read.')
+  })
 })
 
 describe('a decision made twice', () => {
@@ -327,6 +352,31 @@ describe('Revoke mark', () => {
     // Nobody else's mark moves
     expect(await field(`${w.g}/posts/op`, 'author.pro')).toBe(true)
     expect(await field(`users/${w.reader}/notices/from-other`, 'actor.pro')).toBe(true)
+  })
+
+  // The revoke went in, then Auth failed (or the local backend was stopped) before the claim and
+  // the writing caught up. Pressing it again finds it decided, and still finishes what follows
+  it('finishes a revoke that went in when it is pressed again', async () => {
+    const w = await marked()
+    await db.doc(`users/${w.pro}`).update({ pro: false })
+    await db.doc(`proApplications/${w.pro}`).set({ uid: w.pro, status: 'revoked', legalName: 'Test Person', files: ['doc-1'] })
+
+    await expect(reviewProfessional({ uid: w.pro, decision: 'revoke' })).resolves.toMatchObject({ data: { ok: true, outcome: 'already-resolved' } })
+    expect((await claims(w.pro)).pro).toBe(false)
+    for (const path of [...w.theirs, w.held]) expect(await field(path, 'author'), path).toEqual(signed(w.pro, false))
+    expect(await field(`users/${w.reader}/notices/from-pro`, 'actor')).toEqual(signed(w.pro, false))
+    expect(await field(`${w.g}/posts/op`, 'author.pro')).toBe(true)
+  })
+
+  it('leaves the mark alone when an approval is pressed again after a revoke', async () => {
+    const w = await marked()
+    await db.doc(`proApplications/${w.pro}`).set({ uid: w.pro, status: 'approved', legalName: 'Test Person', files: ['doc-1'] })
+    await expect(reviewProfessional({ uid: w.pro, decision: 'revoke' })).resolves.toMatchObject({ data: { ok: true } })
+
+    await expect(reviewProfessional({ uid: w.pro, decision: 'approve' })).resolves.toMatchObject({ data: { ok: true, outcome: 'already-resolved' } })
+    expect((await claims(w.pro)).pro).toBe(false)
+    expect(await field(`users/${w.pro}`, 'pro')).toBe(false)
+    expect(await field(w.theirs[0], 'author.pro')).toBe(false)
   })
 
   it('lets writing held before the revoke go out without the mark, and its notices too', async () => {

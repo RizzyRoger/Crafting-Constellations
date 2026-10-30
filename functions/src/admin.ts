@@ -42,6 +42,11 @@ const mergeClaims = async (uid: string, patch: Record<string, unknown>) => {
 
 const notice = (type: string, extra: Record<string, unknown> = {}) => ({ type, ...extra, createdAt: FieldValue.serverTimestamp(), seen: false })
 
+// What a moderator takes down stays readable to its writer, and a uid is enough to find the person
+// behind it, so it says only that a moderator did (as automod's say 'automod'). Who it was is kept
+// where only moderators read: the queue entry, the ban and adminActions
+const removedByModerator = (now: FieldValue) => ({ status: 'removed', removedBy: 'moderator', removedAt: now })
+
 // Reset a reported profile to a quiet generated name and clear the note. The name
 // it was reported under is retired, not freed, so nobody can take it again, the
 // person included, even if they've renamed since (see resetNames). The retired
@@ -170,14 +175,14 @@ export const approveContent = onCall<{ queueId: string }>(callable(), async (req
 
 // Take down queued writing, or reset a queued profile, as Remove says. A reset
 // also gives the new name, for the writing the person already has out.
-const takeDown = async (tx: Transaction, queued: DocumentData, actor: string, now: FieldValue): Promise<{ removal: Removal; penName?: string }> => {
+const takeDown = async (tx: Transaction, queued: DocumentData, now: FieldValue): Promise<{ removal: Removal; penName?: string }> => {
   if (queued.kind === 'profile') {
     const penName = await resetProfile(tx, queued, now)
     return penName ? { removal: 'remove', penName } : { removal: 'gone' }
   }
   const contentRef = db.doc(queued.contentPath)
   const removal = removalOf((await tx.get(contentRef)).data()?.status)
-  if (removal === 'remove') tx.update(contentRef, { status: 'removed', removedBy: actor, removedAt: now })
+  if (removal === 'remove') tx.update(contentRef, removedByModerator(now))
   return { removal }
 }
 
@@ -193,7 +198,7 @@ export const removeContent = onCall<{ queueId: string; note?: string }>(callable
     if (queued.state !== 'open') return null
     notTheirOwn(actor, queued.authorUid)
     const now = FieldValue.serverTimestamp()
-    const { removal, penName } = await takeDown(tx, queued, actor, now)
+    const { removal, penName } = await takeDown(tx, queued, now)
     tx.update(queueRef, { state: 'resolved', resolution: removal === 'withdrawn' ? 'withdrawn' : 'removed', resolvedBy: actor, resolvedAt: now, updatedAt: now })
     // Only the writer of something a moderator took down hears about it
     if (removal === 'remove') {
@@ -238,7 +243,7 @@ export const banUser = onCall<{ uid: string; reason: string; hideContent?: boole
       const items = await db.collectionGroup(group).where('authorUid', '==', uid).get()
       items.docs
         .filter((d) => ['published', 'pending', 'held'].includes(d.data().status))
-        .forEach((d) => writer.update(d.ref, { status: 'removed', removedBy: actor, removedAt: now }))
+        .forEach((d) => writer.update(d.ref, removedByModerator(now)))
     }
   }
   await writer.close()
@@ -283,19 +288,39 @@ export const reviewProfessional = onCall<{ uid: string; decision: 'approve' | 'd
       if (!licenceOpen(decision, application.get('status'), profile.get('pro'))) return false
       const now = FieldValue.serverTimestamp()
       const status = decision === 'approve' ? 'approved' : decision === 'deny' ? 'denied' : 'revoked'
-      if (application.exists) tx.update(appRef, { status, reviewedAt: now, reviewedBy: actor, reviewNote: note })
+      // The applicant reads their application, so it never names the moderator (adminActions does),
+      // and a decision takes off the name an older one left there
+      if (application.exists) tx.update(appRef, { status, reviewedAt: now, reviewedBy: FieldValue.delete(), reviewNote: note })
       tx.update(userRef, { pro, ...(pro ? { proSince: now } : {}), updatedAt: now })
       if (decision !== 'revoke') tx.set(userRef.collection('notices').doc(), notice(pro ? 'proApproved' : 'proDenied', { note }))
       return true
     })
-    if (!decided) return { ok: true, outcome: 'already-resolved' }
 
     // A profile its account outlived has no tokens left to carry the claim, but still loses the mark
-    if (await userOrNone(auth.getUser(uid))) await mergeClaims(uid, { pro })
-    await logAction(actor, 'reviewProfessional', uid, { decision })
+    const claim = async () => {
+      if (await userOrNone(auth.getUser(uid))) await mergeClaims(uid, { pro })
+    }
     // Writing from now on takes the mark from the profile. Taking it away takes it off what
     // they already wrote too; an approval marks only what they write next
-    if (!pro) await refreshWriting(uid, { pro: false })
+    const mark = async () => {
+      if (!pro) await refreshWriting(uid, { pro: false })
+    }
+
+    if (!decided) {
+      // The same decision again, as a retry after Auth failed or the local backend was stopped
+      // part way: what follows it is safe to do again, and may not have been done. Only while the
+      // profile says what this decision says, read now, as another moderator may have decided since
+      const current = await userRef.get()
+      if (current.exists && (current.get('pro') === true) === pro) {
+        await claim()
+        await mark()
+      }
+      return { ok: true, outcome: 'already-resolved' }
+    }
+    // Logged as soon as it's decided, so a failure after still leaves who decided
+    await logAction(actor, 'reviewProfessional', uid, { decision })
+    await claim()
+    await mark()
     return { ok: true }
   },
 )
