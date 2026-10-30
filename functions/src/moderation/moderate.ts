@@ -76,8 +76,23 @@ const trimLink = (link: string) => {
   return at > 0 && !ANOTHER_SITE.test(trimmed.slice(at)) ? trimmed.slice(0, at).replace(LINK_END, '') : trimmed
 }
 
+// An address with a path, a port or a query straight after it is a link with
+// a login, as is one that starts "www.": "nhs.uk@evil.com/login" and
+// "www.nhs.uk@evil.com" sign in to evil.com. So is one with a dot that ends
+// the host, a backslash or an empty port before the path, which a browser
+// reads the same ("x@evil.com./login", "x@evil.com\login", "x@evil.com:/").
+// Not when all that follows is the punctuation that ends a sentence: "is it
+// jo@example.com?"
+const AFTER_ADDRESS = /^\.?(?:[/?#\\]|:[\d/\\])[^\s<>()]*/u
+
 const findLinks = (raw: string) =>
-  [...raw.matchAll(LINK_OR_EMAIL)].filter((m) => !m[1]).map((m) => trimLink(m[0]))
+  [...raw.matchAll(LINK_OR_EMAIL)].flatMap((m) => {
+    if (!m[1]) return [trimLink(m[0])]
+    const address = m[2] ?? ''
+    const rest = raw.slice((m.index ?? 0) + m[0].length).match(AFTER_ADDRESS)?.[0] ?? ''
+    const link = trimLink(address + rest)
+    return link.length > address.length || address.startsWith('www.') ? [link] : []
+  })
 
 const isPersonalPhone = (match: string) => {
   const digits = match.replace(/\D/g, '')

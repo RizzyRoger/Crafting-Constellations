@@ -78,16 +78,16 @@ const BANG_END = /([\p{L}\p{N}][@$]*)[!|][!|@$]*(?![\p{L}\p{N}])/gu
 // one counted in words when a distance follows ("a few kms away", "hundreds of
 // kms for her scans"), which the count is kept for; without one ("so many kms
 // thoughts") it's read as it is meant. After "want" or "going", a 2 is "to"
-// unless a distance follows: "I want 2 kms" stays, "going 2 kms down the road"
-// goes. A bare "kms", or one after "gonna", "about" or "one" ("no one kms"), is
-// still read as it is meant.
+// unless a distance follows, spaced or not: "I want 2 kms" and "want2kms"
+// stay, "going 2 kms down the road" goes. A bare "kms", or one after "gonna",
+// "about" or "one" ("no one kms"), is still read as it is meant.
 const COUNT =
   '(?:a )?few|(?:a )?couple(?: of)?|several|many|lots of|hundreds of|thousands of|' +
   'two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|hundred|thousand'
 // Words that make a counted "kms" a distance: where to, how far, how often
 const AWAY = 'away|from|to|for|each|per|of|is|down|up|along|further|more|round|a day|back|home|there|out'
 const DISTANCE = new RegExp(
-  `\\b((?:wants?|wanna|going|gonna) 2\\s*km'?s)\\b(?! (?:away|down|up|along|further|more|from|to|round|each|a day)\\b)|` +
+  `\\b((?:wants?|wanna|going|gonna) ?2\\s*km'?s)\\b(?! (?:away|down|up|along|further|more|from|to|round|each|a day)\\b)|` +
     `\\d(?:[\\d.,]*\\d)?\\s*km'?s\\b|\\b(${COUNT})\\s+km'?s\\b(?=\\s+(?:${AWAY})\\b)`,
   'gu',
 )
@@ -121,12 +121,15 @@ const SWORN_AT_ILLNESS = new RegExp(
 )
 
 // Punctuation that ends a word, a dash, a line break or an emoji ends a
-// clause: "I can't go on 😭 the pain…". So does a full stop, ! or ? with the
-// space left out ("go on.The pain"), but only as extra lines on top: a ! can
-// also be an "i" inside a word ("l!ve"), and splitting there alone would lose
-// the clause it belongs to.
+// clause: "I can't go on 😭 the pain…". So do a full stop, ! or ? with the
+// space left out ("go on.The pain") and an emoji that shows as text until the
+// keyboard colours it ("go on ☹️ the pain"), but only as extra lines on top: a
+// ! can also be an "i" inside a word ("l!ve"), and those emoji are also the
+// symbols people type mid-sentence (©, ✔, arrows). Splitting there alone would
+// lose the clause either one belongs to.
 const CLAUSE_END = /[.,;:!?-]+(?![\p{L}\p{N}])|[\n\u2013\u2014\p{Emoji_Presentation}]/gu
 const TIGHT_END = /[.!?]+(?=\p{L})/gu
+const ANY_EMOJI = new RegExp(EMOJI, 'gu')
 
 export interface Normalized {
   raw: string
@@ -287,7 +290,7 @@ export const normalize = (text: string): Normalized => {
   const leet = wordsOf(prose, { fold: foldLeet })
   const squeezed = wordsOf(prose, { runs: '$1' })
   const loose = prose.split(CLAUSE_END)
-  const tight = loose.flatMap((clause) => clause.split(TIGHT_END))
+  const tight = loose.flatMap((clause) => [...clause.split(TIGHT_END), ...clause.split(ANY_EMOJI)])
   const clauses = [...new Set([...loose, ...tight].map((clause) => wordsOf(clause)).filter(Boolean))].join('\n')
   return { raw, digits, words, joined, unmarked, folded, leet, squeezed, clauses }
 }

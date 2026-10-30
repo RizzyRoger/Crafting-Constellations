@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { checkPenName, isAllowedLink, moderate, suggestPenName, tidyPenName } from './index.js'
+import { penNameShape } from './penName.js'
 
 const rot13 = (s: string) =>
   s.replace(/[a-z]/g, (c) => String.fromCharCode(((c.charCodeAt(0) - 97 + 13) % 26) + 97))
@@ -89,6 +90,8 @@ describe('moderate — publishes ordinary support talk', () => {
     'how many kms is it to the hospice?',
     'its ten kms each way',
     "We're going 2 kms down the road for lunch",
+    "We're going 2kms down the road for lunch",
+    'it is only 2kms away',
     "I'm going to odd places",
     'I wanna go home',
     // A ! or | that ends the line is punctuation, not an "i" on the last word
@@ -98,6 +101,9 @@ describe('moderate — publishes ordinary support talk', () => {
     "I can't keep going back|",
     // A full stop with the space left out still ends the sentence
     "We can't go on holiday.Mum is in hospital again",
+    // The digits, # and * that also count as emoji don't end a clause
+    "We can't go on #holiday this year",
+    "We can't go on *holiday* this year",
     'family 👨\u200d👩\u200d👧 love',
     '',
   ])('%j', (text) => {
@@ -108,6 +114,23 @@ describe('moderate — publishes ordinary support talk', () => {
 
   it.each(OTHER_DIGITS)('reads a distance in %s digits as in ASCII ones', (_, zero) => {
     expect(held(inDigits(zero, 'the hospital is 40 kms away'))).toMatchObject({ action: 'publish', crisis: false })
+  })
+
+  // Going on with a treatment, or going on a trial, is a choice about care
+  // (ROT13, as each holds a crisis phrase)
+  it.each([
+    "gur bapbybtvfg fnvq gurer'f ab cbvag va tbvat ba jvgu purzb",
+    'qnq qrpvqrq gurer jnf ab cbvag va tbvat ba jvgu qvnylfvf',
+    "jr nterrq gurer'f ab cbvag va tbvat ba jvgu gerngzrag",
+    'ab cbvag va tbvat ba jvgu gur enqvbgurencl',
+    "gurer'f ab ernfba gb tb ba gur gevny abj",
+    'ab ernfba 2 tb ba jvgu gur gevny',
+    // A reason for it, or a new sentence about something else, is still the choice
+    "gur bapbybtvfg fnvq gurer'f ab cbvag va tbvat ba jvgu purzb orpnhfr vg unf fcernq",
+    "gur bapbybtvfg fnvq gurer'f ab cbvag va tbvat ba jvgu purzb. qnq vf pbzvat ubzr ba sevqnl",
+  ].map(rot13))('%j', (text) => {
+    expect(held(text)).toMatchObject({ action: 'publish', crisis: false })
+    expect(held(text, 'private')).toMatchObject({ action: 'publish', crisis: false })
   })
 })
 
@@ -488,6 +511,76 @@ describe('moderate — crisis language', () => {
     'ab ernfba 2 yvir',
     'vz tbvat 2 bireqbfr',
     'v jnag 2 bq',
+    'v jnag 2 xzf',
+    'v jnag2xzf',
+    'v jnag 2xzf',
+    'v jnag2 xzf',
+    'v jnaan2xzf',
+    'vz tbvat2xzf',
+  ].map(rot13))('%j is crisis', (text) => {
+    expect(held(text)).toMatchObject({ action: 'hold', crisis: true, categories: ['selfHarm'] })
+    expect(held(text, 'private').crisis).toBe(true)
+  })
+
+  // An emoji ends the clause whether it shows in colour by default or only with
+  // the variation selector that most keyboards add, spaced or not (ROT13 as above)
+  it.each([
+    ['v pnag tb ba', '☹️', 'the pain is too much'],
+    ['v pnag tb ba', '☹', 'the pain is too much'],
+    ['v pnag tb ba', '❤️', 'the pain is too much'],
+    ['v pnag tb ba', '✌️', 'the pain is too much'],
+    ['v qbag jnag gb jnxr hc', '☹️', 'my dad would cope'],
+    ['v qbag jnag gb jnxr hc', '☠️', 'my dad would cope'],
+  ])('%j %j %j is crisis', (phrase, emoji, after) => {
+    const texts = [`${rot13(phrase)} ${emoji} ${after}`, `${rot13(phrase)}${emoji}${after}`]
+    texts.forEach((text) => {
+      expect(held(text)).toMatchObject({ action: 'hold', crisis: true, categories: ['selfHarm'] })
+      expect(held(text, 'private').crisis).toBe(true)
+    })
+  })
+
+  // Only a treatment after it is a choice about care: going on with life, with
+  // it or like this, on my own, with a treatment and then how it feels or more
+  // than the treatment, with life's trials, and every reason to live, are still
+  // crisis (ROT13 as above)
+  it.each([
+    "gurer'f ab cbvag va tbvat ba",
+    'ab cbvag va tbvat ba jvgu zl yvsr',
+    'ab cbvag va tbvat ba jvgu vg',
+    'ab cbvag va tbvat ba jvgu guvf',
+    'ab ernfba gb tb ba jvgu yvsr',
+    'ab cbvag va tbvat ba yvxr guvf',
+    'ab ernfba gb tb ba nal zber',
+    'ab cbvag va tbvat ba zl bja',
+    'ab ernfba gb tb ba gurfr qnlf',
+    'ab cbvag va tbvat ba jvgu gerngzrag yvxr guvf',
+    'ab cbvag va tbvat ba jvgu qvnylfvf nal zber',
+    'ab cbvag va tbvat ba jvgu purzb vz qbar',
+    'ab cbvag va tbvat ba jvgu gerngzrag naq yvivat yvxr guvf',
+    'ab ernfba gb tb ba jvgu gerngzrag be jvgu yvsr',
+    'ab cbvag va tbvat ba jvgu purzb be nalguvat',
+    'ab cbvag va tbvat ba jvgu qvnylfvf ohg yvsr vf gbb uneq',
+    'ab ernfba gb tb ba jvgu gerngzrag abe jvgu yvsr',
+    'ab cbvag va tbvat ba jvgu purzb jura vg vf abg jbexvat',
+    'ab ernfba gb tb ba jvgu gerngzrag vs urf tbar',
+    'ab cbvag va tbvat ba jvgu gerngzrag jvgubhg uvz',
+    // A join word that can lead anywhere keeps it held
+    'ab cbvag va tbvat ba jvgu purzb fb v tvir hc',
+    'ab ernfba gb tb ba jvgu gerngzrag fvapr abguvat urycf',
+    'ab cbvag va tbvat ba jvgu qvnylfvf nf v pnag qb guvf',
+    'ab cbvag va tbvat ba jvgu gerngzrag whfg yrg zr tb',
+    'ab ernfba gb tb ba jvgu purzb pbf vz fb gverq',
+    'ab cbvag va tbvat ba jvgu gerngzrag gura',
+    'ab ernfba gb tb ba jvgu gur gevny hagvy gur raq',
+    'ab cbvag va tbvat ba jvgu purzb juvyr vz yvxr guvf',
+    'ab cbvag va tbvat ba jvgu gerngzrag, yvsr vfag jbegu vg',
+    'ab ernfba gb tb ba jvgu purzb, jungf gur cbvag',
+    'ab cbvag va tbvat ba jvgu gur gevnyf bs yvsr',
+    'ab ernfba gb tb ba jvgu gurfr gevnyf',
+    'ab ernfba gb tb ba jvgu gur gevny bs yvsr',
+    'ab ernfba gb yvir va guvf jbeyq',
+    'ab ernfba gb yvir jvgu zl uhfonaq tbar',
+    'ab cbvag va yvivat va guvf cnva',
   ].map(rot13))('%j is crisis', (text) => {
     expect(held(text)).toMatchObject({ action: 'hold', crisis: true, categories: ['selfHarm'] })
     expect(held(text, 'private').crisis).toBe(true)
@@ -760,6 +853,46 @@ describe('moderate — links', () => {
   it('holds a link with a login in private messages, not reading it as an email', () => {
     expect(held('https://nhs.uk@evil.com/login', 'private').categories).toContain('spam')
     expect(held('https://nhs.uk:x@evil.com/login', 'private').categories).toContain('spam')
+  })
+
+  // With no scheme it reads like an email, but a path, port or query after it,
+  // or a "www." in front, makes it a link that signs in to the host after the @
+  it.each([
+    'see www.nhs.uk@evil.com/login',
+    'nhs.uk@evil.com/login',
+    'see x@evil.com/login',
+    'see nhs.uk@evil.com/',
+    'see nhs.uk@evil.com:443/login',
+    'see nhs.uk@evil.com?next=login',
+    'see www.nhs.uk@evil.com',
+    // A browser reads a dot that ends the host, a backslash and an empty port
+    // the same way
+    'see x@evil.com./login',
+    'see x@evil.com\\login',
+    'see x@evil.com:/login',
+  ])('holds a link with a login and no scheme in private messages: %j', (text) => {
+    expect(held(text, 'private').categories).toContain('spam')
+    expect(held(text).categories).toContain('spam')
+  })
+
+  it('reports a link with a login as written', () => {
+    expect(held('see www.nhs.uk@evil.com/login for help', 'private').matches).toEqual([
+      { category: 'spam', term: 'www.nhs.uk@evil.com/login' },
+    ])
+  })
+
+  it.each([
+    'write me at quiet.heron@example.com',
+    'mail me at jo.smith@example.com.',
+    'is it jo@example.com?',
+    'email jo@example.com: any time',
+    'jo@example.com, or call',
+    '(jo@example.com)',
+    'mail me at jo@example.com. Thanks',
+    'mail me at jo@example.com...',
+    'is it jo@example.com.?',
+  ])('still reads an address with nothing after it as an email: %j', (text) => {
+    expect(held(text, 'private').action).toBe('publish')
   })
 
   it('holds links on other domains and written with an ideographic full stop', () => {
@@ -1039,6 +1172,8 @@ describe('pen names', () => {
     expect(tidyPenName('  Quiet   Heron ')).toBe('Quiet Heron')
     expect(tidyPenName('O\u02bcNeil')).toBe('O\u02bcNeil')
     expect(tidyPenName('Moderators')).toBe('Moderators')
+    // A name wholly in Cyrillic keeps its own key, though it passes for "Joy"
+    expect(tidyPenName('\u0408\u043e\u0443').toLowerCase()).toBe('\u0458\u043e\u0443')
     // Lookalike letters are read as plain ones only when looking for a role
     expect(tidyPenName('\u029c\u1d07\u0280\u1d0f\u0274')).toBe('\u029c\u1d07\u0280\u1d0f\u0274')
     expect(tidyPenName('I\u015f\u0131k')).toBe('I\u015f\u0131k')
@@ -1190,9 +1325,89 @@ describe('pen names', () => {
     ['D\u0280 Heron', 'reserved'],
     ['Adm\u0131n', 'reserved'],
     ['Site\u1d00dmin', 'reserved'],
+    // Wholly in an alphabet whose letters are drawn as Latin ones: Cherokee
+    // MOD, DR, MD and PHD, Lisu ADMIN, MODERATOR, DR HERON and NURSE JOY, and
+    // Cyrillic Mod, mod and MD with the Komi d
+    ['\u13b7\u13eb\u13a0', 'reserved'],
+    ['\u13a0\u13a1', 'reserved'],
+    ['\u13b7\u13a0', 'reserved'],
+    ['\u13e2\u13bb\u13a0', 'reserved'],
+    ['\ua4ee\ua4d3\ua4df\ua4f2\ua4e0', 'reserved'],
+    ['\ua4df\ua4f3\ua4d3\ua4f0\ua4e3\ua4ee\ua4d4\ua4f3\ua4e3', 'reserved'],
+    ['\ua4d3\ua4e3 \ua4e7\ua4f0\ua4e3\ua4f3\ua4e0', 'reserved'],
+    ['\ua4e0\ua4f4\ua4e3\ua4e2\ua4f0 \ua4d9\ua4f3\ua4ec', 'reserved'],
+    ['\u041c\u043e\u0501', 'reserved'],
+    ['\u043c\u043e\u0501', 'reserved'],
+    ['\u041c\u0500', 'reserved'],
+    // With an accent, read as the letter it sits on (Cyrillic Möd), and
+    // Cherokee small letters, drawn as small capitals (DR)
+    ['\u041c\u04e7\u0501', 'reserved'],
+    ['\uab70\uab71', 'reserved'],
+    // Cyrillic capital shha and Greek small rho, drawn as H and p (PhD, Np)
+    ['\u0420\u04ba\u0500', 'reserved'],
+    ['\u039d\u03c1', 'reserved'],
+    // A small l among capitals is drawn as an I, and is still an l
+    ['ADMlN', 'reserved'],
+    ['OFFlClAL', 'reserved'],
+    ['A D M l N', 'reserved'],
+    ['lPC', 'reserved'],
     [`Big ${rot13('ergneq')}`, 'unkind'],
   ])('%j → %s', (name, problem) => {
     expect(checkPenName(name)).toEqual({ ok: false, problem })
+  })
+
+  // Read as Latin letters only to find a role or a copy: words and names in
+  // those alphabets pass as typed
+  it.each(['Анна', 'Мама', 'Тото', 'Νίκος', 'ΜΑΡΙΑ', 'ρακί', 'ᏣᎳᎩ', 'Արմեն'])('accepts %j', (name) => {
+    expect(checkPenName(name)).toEqual({ ok: true, value: name })
+    expect(checkPenName(name, { chat: true })).toEqual({ ok: true, value: name })
+  })
+
+  // The name a pen name passes for, which saveProfile refuses when it is
+  // someone else's: letters drawn the same as Latin ones, and an apostrophe
+  // that is a letter, read as the plain ones
+  it.each([
+    ['Joy', '\u0408\u043e\u0443'],
+    ['Hope', '\u041d\u043e\u0440\u0435'],
+    ['Slow', '\u0405\u04cf\u043e\u051d'],
+    ['Coco', '\u0421\u043e\u0441\u043e'],
+    ['Kay', '\u041a\u0430\u0443'],
+    ['ANNA', '\u0391\u039d\u039d\u0391'],
+    ['KATE', '\u039a\u0391\u03a4\u0395'],
+    ['JOY', '\ua4d9\ua4f3\ua4ec'],
+    // With accents, a mark on a copied letter or a Cyrillic letter that has one
+    ['Jos\u00e9', '\u0408\u043e\u0455\u0435\u0301'],
+    ['ZO\u00cb', '\u0396\u039f\u0395\u0308'],
+    ['J\u00f6y', '\u0408\u04e7\u0443'],
+    ['Chlo\u00eb', '\u0421\u04bb\u04cf\u043e\u0451'],
+    ['Hop\u00e8', '\u041d\u043e\u0440\u0450'],
+    ["O'Neil", 'O\u02bcNeil'],
+    ["O'Neil", 'O\u2019Neil'],
+  ])('reads %j and %j as one name', (name, copy) => {
+    expect(checkPenName(copy).ok).toBe(true)
+    expect(penNameShape(copy)).toBe(penNameShape(name))
+    // A plain name passes for its own key, so only a copy needs a second look
+    expect(penNameShape(name)).toBe(tidyPenName(name).toLowerCase())
+  })
+
+  // A name with none of those letters passes for its own key, accents and
+  // all, so saveProfile reads nothing more for it
+  it.each(['José', 'Søren', 'İlknur', 'Nguyễn Văn', 'Đặng', 'Ægir', '민지', 'प्रिया', 'Ömer'])(
+    'reads %j as its own key',
+    (name) => {
+      expect(penNameShape(name)).toBe(tidyPenName(name).toLowerCase())
+    },
+  )
+
+  // Letters only like a Latin one (Cyrillic м and н, a dotless ı) keep a name
+  // its own
+  it.each([
+    ['Mama', 'Мама'],
+    ['Anna', 'Анна'],
+    ['Nikos', 'Νίκος'],
+    ['Yilmaz', 'Yılmaz'],
+  ])('keeps %j and %j apart', (name, other) => {
+    expect(penNameShape(other)).not.toBe(penNameShape(name))
   })
 
   // A name that holds crisis language is still refused, but as its own problem,
@@ -1325,6 +1540,12 @@ describe('pen names', () => {
     ['Joy R.N. chat', 'reserved'],
     ['Ann Ph D', 'reserved'],
     ['Ann M.D. M.P.H.', 'reserved'],
+    ['\u13a0\u13a1 Heron', 'reserved'],
+    ['\uab70\uab71 Heron', 'reserved'],
+    ['\ua4ee\ua4d3\ua4df\ua4f2\ua4e0 chat', 'reserved'],
+    ['\u041c\u043e\u0501 chat', 'reserved'],
+    ['\u041c\u04e7\u0501 chat', 'reserved'],
+    ['ADMlN chat', 'reserved'],
     ['\u0410dmin chat', 'mixed'],
     ['Quiet H\u0435ron', 'mixed'],
     ['So\u0338ren', 'characters'],

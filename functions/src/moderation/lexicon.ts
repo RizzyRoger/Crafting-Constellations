@@ -2,7 +2,7 @@
 // (see normalize.ts): lowercase, no apostrophes, leetspeak folded.
 // Bump LEXICON_VERSION whenever a list changes; it is stored on queue items.
 
-export const LEXICON_VERSION = 'lex-2026-10-23f'
+export const LEXICON_VERSION = 'lex-2026-10-29a'
 
 export type Category = 'slur' | 'harassment' | 'selfHarm' | 'spam' | 'personalInfo'
 
@@ -136,10 +136,24 @@ const REST_OF_LIFE = 'the rest of (?:my|our) li(?:fe|ves)'
 const NEW_SENTENCE =
   'i|im|ive|id|its|thats|is|isnt|are|arent|was|wasnt|were|werent|has|hasnt|have|havent|does|doesnt|did|didnt|' +
   'will|wont|would|wouldnt|can|cant|could|couldnt|makes?|keeps?|feels?|hurts?|takes?|aint'
+const NOT_HOW_IT_FEELS =
+  `(?! (?:${NEW_SENTENCE}|like|(?:any|no) ?more|(?:much |any |no )?longer|for ?ever|(?:for )?${REST_OF_LIFE})\\b)`
 const PLAN =
-  `${DETERMINER}|this|${OUTING}|${SHORT_DAY}|${GO_ON}|any (?:${OUTING}|${GO_ON})|` +
-  `(?:${TREATMENT})(?! (?:${NEW_SENTENCE}|like|(?:any|no) ?more|(?:much |any |no )?longer|for ?ever|` +
-  `(?:for )?${REST_OF_LIFE})\\b)`
+  `${DETERMINER}|this|${OUTING}|${SHORT_DAY}|${GO_ON}|any (?:${OUTING}|${GO_ON})|(?:${TREATMENT})${NOT_HOW_IT_FEELS}`
+// Going on with a treatment, or going on one, is a choice about care: "the
+// oncologist said there's no point in going on with chemo", "no reason to go
+// on the trial". Not when how it feels follows, as above ("… with chemo like
+// this"), when the line runs on past the treatment ("… and living like this",
+// "… or with life", "… when it's not working", "… without him"), or when it
+// turns to life itself ("…, life isn't worth it", "…, what's the point").
+// "So", "since", "as", "cos", "just", "then", "until" or "while" after it can lead
+// anywhere, so the line is held as before: only "because" and a new sentence
+// keep it the choice. "With it", "with this", "with my life" and "the trials
+// of life" are no treatment.
+const RUNS_ON = 'and|or|but|nor|when|if|of|without|so|since|as|just|cos|then|until|while|life|living|alive|anything|whats?'
+const ON_TREATMENT =
+  `(?:with )?(?:(?:${DETERMINER}) )?(?:chemo(?:therapy)?|treatments?|trial|${TREATMENT})\\b${NOT_HOW_IT_FEELS}` +
+  `(?! (?:${RUNS_ON})\\b)`
 // "Going in" is going in to a ward or to work ("in and out of hospital", "in
 // every day"); "in this pain" and "into another day" or "into every day" are
 // how it feels. Going "for" is only to an appointment: "for much longer" and
@@ -188,7 +202,9 @@ const TO = '(?: to | ?2 ?)'
 // resources for both people.
 export const SELF_HARM: RegExp[] = [
   /\b(?:(?:kill|hurt|harm)(?:ing|s)?|harmed|cut(?:t?ing|s)?) (?:myself|my self)\b/u,
-  /\bkms\b/u,
+  // Also glued to a 2 that reads as "to" ("want2kms"): normalize drops every
+  // other number before it as a distance
+  /(?:\b|2)kms\b/u,
   /\bunalive (?:myself|me)\b/u,
   /\bend(?:ing)? (?:it all|my (?:own )?life)\b/u,
   /\btak(?:e|ing) my (?:own )?life\b(?! (?:back|savings)\b)/u,
@@ -201,7 +217,7 @@ export const SELF_HARM: RegExp[] = [
     `\\b(?:dont|do not) (?:want${TO}|wanna )wake up\\b(?! (?!the next\\b|(?:${HOW_LONG})\\b)(?:${SOMEONE}|early|${WAKING})\\b)`,
     'u',
   ),
-  new RegExp(`\\bno (?:reason|point)(?:${TO}| in )(?:live|living|go on|going on)\\b`, 'u'),
+  new RegExp(`\\bno (?:reason|point)(?:${TO}| in )(?:live|living|go(?:ing)? on(?! ${ON_TREATMENT}))\\b`, 'u'),
   /\bbetter off without me\b/u,
   new RegExp(`\\b(?:cant|cannot|can not) go on\\b(?! (?!(?:${HOW_LONG})\\b)(?:${PLAN})\\b)`, 'u'),
   new RegExp(`\\b(?:cant|cannot|can not) keep going\\b(?! (?!(?:${HOW_LONG})\\b)(?:${DETERMINER}|this|${DIRECTION})\\b)`, 'u'),

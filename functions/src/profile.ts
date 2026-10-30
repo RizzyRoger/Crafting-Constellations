@@ -3,6 +3,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { auth, db, PIGMENTS } from './app.js'
 import { userOrNone } from './localBackendPolicy.js'
 import { checkPenName, moderate, suggestPenName, tidyPenName } from './moderation/index.js'
+import { penNameShape } from './moderation/penName.js'
 import { callable } from './options.js'
 import { mayRelease } from './profilePolicy.js'
 
@@ -68,10 +69,17 @@ export const saveProfile = onCall<SaveProfileInput>(callable(), async (request) 
     const nameRef = lower ? db.doc(`penNames/${lower}`) : undefined
     const oldLower = typeof current?.penNameLower === 'string' ? current.penNameLower : undefined
     const oldRef = nameRef && oldLower && oldLower !== lower ? db.doc(`penNames/${oldLower}`) : undefined
-    const [claim, oldClaim] = await Promise.all([nameRef, oldRef].map(async (ref) => (ref ? (await tx.get(ref)).data() : undefined)))
+    // A name drawn the same as another ("Јоу" in Cyrillic for "Joy", "OʼNeil" for "O'Neil") is
+    // that name, someone else's or retired. Not read for the name they already go by: one saved
+    // before copies were read stays theirs
+    const shape = penName && lower !== oldLower ? penNameShape(penName) : undefined
+    const shapeRef = shape && shape !== lower ? db.doc(`penNames/${shape}`) : undefined
+    const [claim, oldClaim, copied] = await Promise.all(
+      [nameRef, oldRef, shapeRef].map(async (ref) => (ref ? (await tx.get(ref)).data() : undefined)),
+    )
     // A name a moderator retired (Reset profile) has no owner, and nobody gets it back
-    if (claim?.retired === true) throw new HttpsError('invalid-argument', 'pen-name', { problem: 'unkind' })
-    if (claim?.uid && claim.uid !== uid) throw new HttpsError('already-exists', 'pen-name', { problem: 'taken' })
+    if ([claim, copied].some((record) => record?.retired === true)) throw new HttpsError('invalid-argument', 'pen-name', { problem: 'unkind' })
+    if ([claim, copied].some((record) => record?.uid && record.uid !== uid)) throw new HttpsError('already-exists', 'pen-name', { problem: 'taken' })
 
     if (oldRef && mayRelease(oldClaim, uid)) tx.delete(oldRef)
     if (nameRef) tx.set(nameRef, { uid })
